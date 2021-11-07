@@ -60,8 +60,9 @@ type ByteNibbler interface {
 	ReadByte() (byte, error)
 	UnreadByte() error
 	PeekAtNextByte() (byte, error)
-	UseNamedCharacterSetsMap(*NamedCharacterSetsMap)
-	ReadNextBytesFromSet(setName string) ([]byte, error)
+	AddNamedCharacterSetsMap(*NamedCharacterSetsMap)
+	ReadNextBytesMatchingSet(setName string) ([]byte, error)
+	ReadNextBytesNotMatchingSet(setName string) ([]byte, error)
 }
 
 // ByteSliceNibbler is a ByteNibbler using a static byte buffer.  A ReadByte or PeekAtNextbyte at
@@ -69,22 +70,25 @@ type ByteNibbler interface {
 type ByteSliceNibbler struct {
 	backingBuffer               []byte
 	indexInBufferOfNextReadByte int
-	namedCharacterSets          *NamedCharacterSetsMap
+	delegate                    *byteNibblerDelegate
 }
 
 // NewByteSliceNibbler returns a new ByteSliceNibbler using the backing buffer.  Elements of the buffer
 // backing array are not changed by any operation of the ByteSliceNibbler.
 func NewByteSliceNibbler(buffer []byte) *ByteSliceNibbler {
-	return &ByteSliceNibbler{
+	nibbler := &ByteSliceNibbler{
 		backingBuffer:               buffer,
 		indexInBufferOfNextReadByte: 0,
-		namedCharacterSets:          nil,
 	}
+
+	nibbler.delegate = newByteNibblerDelegate(nibbler)
+
+	return nibbler
 }
 
-// UseNamedCharacterSetsMap receives a NamedCharacterSetsMap, to be used by ReadBytesFromSet().
-func (nibbler *ByteSliceNibbler) UseNamedCharacterSetsMap(setsMap *NamedCharacterSetsMap) {
-	nibbler.namedCharacterSets = setsMap
+// AddNamedCharacterSetsMap receives a NamedCharacterSetsMap, to be used by ReadBytesFromSet().
+func (nibbler *ByteSliceNibbler) AddNamedCharacterSetsMap(setsMap *NamedCharacterSetsMap) {
+	nibbler.delegate.namedCharacterSets = setsMap
 }
 
 // ReadByte attempts to read the next byte in the backing array.  If all bytes have been read, then io.EOF
@@ -120,65 +124,55 @@ func (nibbler *ByteSliceNibbler) PeekAtNextByte() (byte, error) {
 	return nibbler.backingBuffer[nibbler.indexInBufferOfNextReadByte], nil
 }
 
-// ReadNextBytesFromSet reads bytes in the stream as long as they match the characters in the
+// ReadNextBytesMatchingSet reads bytes in the stream as long as they match the characters in the
 // setName (which, in turn, must be supplied to the NamedCharacterSetsMap provided in UseNamedCharacterSetsMap).
 // Return an error if no named character sets map has been provided, if the setName provided is
 // not in that map, or if the stream read produces an error.  Note that this error may be io.EOF.
 // Whether or not an error is returned, the assembled slice of bytes read from the stream is also returned.
 // After this method returns, the nibbler's next byte is the one after the last character in the returned set.
-func (nibbler *ByteSliceNibbler) ReadNextBytesFromSet(setName string) ([]byte, error) {
-	if nibbler.namedCharacterSets == nil {
-		return nil, fmt.Errorf("no character set with that name is defined")
-	}
+func (nibbler *ByteSliceNibbler) ReadNextBytesMatchingSet(setName string) ([]byte, error) {
+	return nibbler.delegate.readNextBytesMatchingSet(setName)
+}
 
-	setMap := nibbler.namedCharacterSets.retrieveNamedCharacterSet(setName)
-	if setMap == nil {
-		return nil, fmt.Errorf("no character set with that name is defined")
-	}
-
-	bytesInSet := make([]byte, 0, 20)
-
-	for {
-		character, err := nibbler.ReadByte()
-		if err != nil {
-			return bytesInSet, err
-		}
-
-		if _, characterIsInMap := setMap[character]; characterIsInMap {
-			bytesInSet = append(bytesInSet, character)
-		} else {
-			_ = nibbler.UnreadByte()
-			return bytesInSet, nil
-		}
-	}
+// ReadNextBytesNotMatchingSet is the inverse of ReadNextBytesMatchingSet.  It reads the underlying
+// byte slice from the first byte in the unread stream, returning the contiguous bytes that do not
+// match the bytes in named set.
+func (nibbler *ByteSliceNibbler) ReadNextBytesNotMatchingSet(setName string) ([]byte, error) {
+	return nibbler.delegate.readNextBytesNotMatchingSet(setName)
 }
 
 // ByteReaderNibbler is a ByteNibbler that uses an io.Reader as its dynamic backing stream.
 // There is no guarantee that the internal buffer representing the pseudo queue grows to
 // the size of all bytes read, so if UnreadByte() is called repeatedly in succession, it may
-// eventually return an error and may not allow a return of every byte previously read.
+// eventually return an error and may not allow a return of every byte previously read.  If
+// a reading action or look-ahead action triggers a Read() of the associated Reader, and that
+// call returns no error, no EOF and zero bytes, an error is raised.  This means that a non-blocking
+// Reader shouldn't be provided.
 type ByteReaderNibbler struct {
 	backingReader               io.Reader
 	internalBuffer              []byte
 	readBuffer                  []byte
 	indexOfNextReadByteInBuffer int
-	namedCharacterSets          *NamedCharacterSetsMap
+	delegate                    *byteNibblerDelegate
 }
 
 // NewByteReaderNibbler returns a ByteReaderNibbler.
 func NewByteReaderNibbler(streamReader io.Reader) *ByteReaderNibbler {
-	return &ByteReaderNibbler{
+	reader := &ByteReaderNibbler{
 		backingReader:               bufio.NewReader(streamReader),
 		readBuffer:                  make([]byte, 9000),
 		internalBuffer:              make([]byte, 0, 18000),
 		indexOfNextReadByteInBuffer: 0,
-		namedCharacterSets:          nil,
 	}
+
+	reader.delegate = newByteNibblerDelegate(reader)
+
+	return reader
 }
 
-// UseNamedCharacterSetsMap receives a NamedCharacterSetsMap, to be used by ReadBytesFromSet().
-func (nibbler *ByteReaderNibbler) UseNamedCharacterSetsMap(setsMap *NamedCharacterSetsMap) {
-	nibbler.namedCharacterSets = setsMap
+// AddNamedCharacterSetsMap receives a NamedCharacterSetsMap, to be used by ReadBytesFromSet().
+func (nibbler *ByteReaderNibbler) AddNamedCharacterSetsMap(setsMap *NamedCharacterSetsMap) {
+	nibbler.delegate.addNamedCharacterSetsMap(setsMap)
 }
 
 func (nibbler *ByteReaderNibbler) readFromStreamAndAppendToInternalBuffer() error {
@@ -236,35 +230,92 @@ func (nibbler *ByteReaderNibbler) PeekAtNextByte() (byte, error) {
 	return nibbler.internalBuffer[nibbler.indexOfNextReadByteInBuffer], nil
 }
 
-// ReadNextBytesFromSet reads bytes in the stream as long as they match the characters in the
+// ReadNextBytesMatchingSet reads bytes in the stream as long as they match the characters in the
 // setName (which, in turn, must be supplied to the NamedCharacterSetsMap provided in UseNamedCharacterSetsMap).
 // Return an error if no named character sets map has been provided, if the setName provided is
 // not in that map, or if the stream read produces an error.  Note that this error may be io.EOF.
 // Whether or not an error is returned, the assembled slice of bytes read from the stream is also returned.
 // After this method returns, the nibbler's next byte is the one after the last character in the returned set.
-func (nibbler *ByteReaderNibbler) ReadNextBytesFromSet(setName string) ([]byte, error) {
-	if nibbler.namedCharacterSets == nil {
+func (nibbler *ByteReaderNibbler) ReadNextBytesMatchingSet(setName string) ([]byte, error) {
+	return nibbler.delegate.readNextBytesMatchingSet(setName)
+}
+
+// ReadNextBytesNotMatchingSet is the inverse of ReadNextBytesMatchingSet.  It reads the underlying
+// byte slice from the first byte in the unread stream, returning the contiguous bytes that do not
+// match the bytes in named set.
+func (nibbler *ByteReaderNibbler) ReadNextBytesNotMatchingSet(setName string) ([]byte, error) {
+	return nibbler.delegate.readNextBytesNotMatchingSet(setName)
+}
+
+// The implementation of a ByteSliceNibbler and ByteReaderNibbler are mostly the same, except
+// for the actual per-byte stream manipulation function.  This underlying type is used by both
+// which then use composition to delegate the common functions.
+type byteNibblerDelegate struct {
+	namedCharacterSets *NamedCharacterSetsMap
+	actualNibbler      ByteNibbler
+}
+
+func newByteNibblerDelegate(delegatingFor ByteNibbler) *byteNibblerDelegate {
+	return &byteNibblerDelegate{
+		namedCharacterSets: nil,
+		actualNibbler:      delegatingFor,
+	}
+}
+
+func (delegate *byteNibblerDelegate) addNamedCharacterSetsMap(setMap *NamedCharacterSetsMap) {
+	delegate.namedCharacterSets = setMap
+}
+
+func (delegate *byteNibblerDelegate) readNextBytesMatchingSet(setName string) ([]byte, error) {
+	if delegate.namedCharacterSets == nil {
 		return nil, fmt.Errorf("no character set with that name is defined")
 	}
 
-	setMap := nibbler.namedCharacterSets.retrieveNamedCharacterSet(setName)
+	setMap := delegate.namedCharacterSets.retrieveNamedCharacterSet(setName)
 	if setMap == nil {
 		return nil, fmt.Errorf("no character set with that name is defined")
 	}
 
-	bytesInSet := make([]byte, 0, 20)
+	matchingContiguousBytes := make([]byte, 0, 20)
 
 	for {
-		character, err := nibbler.ReadByte()
+		character, err := delegate.actualNibbler.ReadByte()
 		if err != nil {
-			return bytesInSet, err
+			return matchingContiguousBytes, err
 		}
 
 		if _, characterIsInMap := setMap[character]; characterIsInMap {
-			bytesInSet = append(bytesInSet, character)
+			matchingContiguousBytes = append(matchingContiguousBytes, character)
 		} else {
-			_ = nibbler.UnreadByte()
-			return bytesInSet, nil
+			_ = delegate.actualNibbler.UnreadByte()
+			return matchingContiguousBytes, nil
+		}
+	}
+}
+
+func (delegate *byteNibblerDelegate) readNextBytesNotMatchingSet(setName string) ([]byte, error) {
+	if delegate.namedCharacterSets == nil {
+		return nil, fmt.Errorf("no character set with that name is defined")
+	}
+
+	setMap := delegate.namedCharacterSets.retrieveNamedCharacterSet(setName)
+	if setMap == nil {
+		return nil, fmt.Errorf("no character set with that name is defined")
+	}
+
+	nonMatchingContiguousBytes := make([]byte, 0, 20)
+
+	for {
+		character, err := delegate.actualNibbler.ReadByte()
+		if err != nil {
+			return nonMatchingContiguousBytes, err
+		}
+
+		if _, characterIsInMap := setMap[character]; !characterIsInMap {
+			nonMatchingContiguousBytes = append(nonMatchingContiguousBytes, character)
+		} else {
+			_ = delegate.actualNibbler.UnreadByte()
+			return nonMatchingContiguousBytes, nil
 		}
 	}
 }
