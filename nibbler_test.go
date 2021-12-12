@@ -69,6 +69,53 @@ func (testCase *singleNibbleTestCase) runTestCaseAgainst(nibber nibbler.ByteNibb
 	return nil
 }
 
+type multiByteNibbleExpectedResult struct {
+	expectedBytes []byte
+	expectAnError bool
+	expectEOF     bool
+}
+
+type multiByteNibbleTestCase struct {
+	numberOfBytesInRead uint
+	expectedResult      *multiByteNibbleExpectedResult
+}
+
+func (testCase *multiByteNibbleTestCase) runTestCaseAgainst(nibbler nibbler.ByteNibbler) error {
+	retrievedBytes, err := nibbler.ReadFixedNumberOfBytes(testCase.numberOfBytesInRead)
+
+	if testCase.expectedResult.expectEOF {
+		if err == nil {
+			return fmt.Errorf("expected EOF, got no error returned")
+		} else if err != io.EOF {
+			return fmt.Errorf("expected EOF, got different error returned (%s)", err.Error())
+		}
+	} else {
+		if err == io.EOF {
+			return fmt.Errorf("expected no EOF, got EOF")
+		}
+
+		if testCase.expectedResult.expectAnError {
+			if err == nil {
+				return fmt.Errorf("expected an error, no error returned")
+			}
+		} else if err != nil {
+			return fmt.Errorf("expected no error, got an error (%s)", err.Error())
+		}
+	}
+
+	if len(retrievedBytes) != len(testCase.expectedResult.expectedBytes) {
+		return fmt.Errorf("expected (%d) bytes in retrieval, but got (%d) bytes", len(testCase.expectedResult.expectedBytes), len(retrievedBytes))
+	}
+
+	for i := 0; i < len(retrievedBytes); i++ {
+		if retrievedBytes[i] != testCase.expectedResult.expectedBytes[i] {
+			return fmt.Errorf("on byte (%d), expected value (%02x), got value (%02d)", i, testCase.expectedResult.expectedBytes[i], retrievedBytes[i])
+		}
+	}
+
+	return nil
+}
+
 func TestByteSliceNibbler(t *testing.T) {
 	nib := nibbler.NewByteSliceNibbler([]byte{})
 
@@ -112,16 +159,25 @@ func TestByteSliceNibbler(t *testing.T) {
 		}
 	}
 
-	// nib = nibbler.NewByteSliceNibbler([]byte{0, 1, 2, 3, 4, 5})
-	// returnedSlice, err := nib.ReadFixedNumberOfBytes(4)
-	// if err != nil {
-
-	// }
+	nib = nibbler.NewByteSliceNibbler([]byte{0, 1, 2, 3, 4, 5, 6})
+	for testIndex, testCase := range []nibblerTestCase{
+		&multiByteNibbleTestCase{numberOfBytesInRead: 0, expectedResult: &multiByteNibbleExpectedResult{}},
+		&multiByteNibbleTestCase{numberOfBytesInRead: 3, expectedResult: &multiByteNibbleExpectedResult{expectedBytes: []byte{0, 1, 2}}},
+		&multiByteNibbleTestCase{numberOfBytesInRead: 1, expectedResult: &multiByteNibbleExpectedResult{expectedBytes: []byte{3}}},
+		&multiByteNibbleTestCase{numberOfBytesInRead: 0, expectedResult: &multiByteNibbleExpectedResult{}},
+		&multiByteNibbleTestCase{numberOfBytesInRead: 2, expectedResult: &multiByteNibbleExpectedResult{expectedBytes: []byte{4, 5}}},
+		&multiByteNibbleTestCase{numberOfBytesInRead: 3, expectedResult: &multiByteNibbleExpectedResult{expectedBytes: []byte{6}, expectEOF: true}},
+		&multiByteNibbleTestCase{numberOfBytesInRead: 3, expectedResult: &multiByteNibbleExpectedResult{expectedBytes: []byte{}, expectEOF: true}},
+	} {
+		if err := testCase.runTestCaseAgainst(nib); err != nil {
+			t.Errorf("(ByteSliceNibbler multiByteNibbler with 6 values in slice) (test %d) %s", testIndex+1, err.Error())
+		}
+	}
 }
 
 func TestByteReaderNibbler(t *testing.T) {
 	reader := mock.NewReader().AddGoodRead([]byte{0, 1, 2, 3}).AddGoodRead([]byte{4, 5}).AddEOF()
-	nibbler := nibbler.NewByteReaderNibbler(reader)
+	nib := nibbler.NewByteReaderNibbler(reader)
 	for testIndex, testCase := range []*singleNibbleTestCase{
 		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: true, expectEOF: false}},
 		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: false}},
@@ -145,10 +201,25 @@ func TestByteReaderNibbler(t *testing.T) {
 		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
 		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
 	} {
-		if err := testCase.runTestCaseAgainst(nibbler); err != nil {
+		if err := testCase.runTestCaseAgainst(nib); err != nil {
 			t.Errorf("(ByteReaderNibbler with 6 values then EOF) (test %d) %s", testIndex+1, err.Error())
 		}
+	}
 
+	reader = mock.NewReader().AddGoodRead([]byte{0, 1, 2, 3}).AddGoodRead([]byte{4, 5, 6}).AddEOF()
+	nib = nibbler.NewByteReaderNibbler(reader)
+	for testIndex, testCase := range []nibblerTestCase{
+		&multiByteNibbleTestCase{numberOfBytesInRead: 0, expectedResult: &multiByteNibbleExpectedResult{}},
+		&multiByteNibbleTestCase{numberOfBytesInRead: 3, expectedResult: &multiByteNibbleExpectedResult{expectedBytes: []byte{0, 1, 2}}},
+		&multiByteNibbleTestCase{numberOfBytesInRead: 1, expectedResult: &multiByteNibbleExpectedResult{expectedBytes: []byte{3}}},
+		&multiByteNibbleTestCase{numberOfBytesInRead: 0, expectedResult: &multiByteNibbleExpectedResult{}},
+		&multiByteNibbleTestCase{numberOfBytesInRead: 2, expectedResult: &multiByteNibbleExpectedResult{expectedBytes: []byte{4, 5}}},
+		&multiByteNibbleTestCase{numberOfBytesInRead: 3, expectedResult: &multiByteNibbleExpectedResult{expectedBytes: []byte{6}, expectEOF: true}},
+		&multiByteNibbleTestCase{numberOfBytesInRead: 3, expectedResult: &multiByteNibbleExpectedResult{expectedBytes: []byte{}, expectEOF: true}},
+	} {
+		if err := testCase.runTestCaseAgainst(nib); err != nil {
+			t.Errorf("(ByteSliceNibbler multiByteNibbler with 6 values in slice) (test %d) %s", testIndex+1, err.Error())
+		}
 	}
 }
 
@@ -195,7 +266,7 @@ func (testCase *namedCharacterSetMatchTestCase) runTestCaseAgainstNibbler(nib ni
 		return fmt.Errorf("expected error, got no error")
 	}
 
-	if bytes.Compare(testCase.expectedReturnedBytes, returnedBytes) != 0 {
+	if !bytes.Equal(testCase.expectedReturnedBytes, returnedBytes) {
 		var returnedBytesInError string
 		var expectedBytesInError string
 
