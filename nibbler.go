@@ -63,6 +63,7 @@ type ByteNibbler interface {
 	AddNamedCharacterSetsMap(*NamedCharacterSetsMap)
 	ReadNextBytesMatchingSet(setName string) ([]byte, error)
 	ReadNextBytesNotMatchingSet(setName string) ([]byte, error)
+	ReadFixedNumberOfBytes(countOfBytesToRead uint) ([]byte, error)
 }
 
 // ByteSliceNibbler is a ByteNibbler using a static byte buffer.  A ReadByte or PeekAtNextbyte at
@@ -139,6 +140,24 @@ func (nibbler *ByteSliceNibbler) ReadNextBytesMatchingSet(setName string) ([]byt
 // match the bytes in named set.
 func (nibbler *ByteSliceNibbler) ReadNextBytesNotMatchingSet(setName string) ([]byte, error) {
 	return nibbler.delegate.readNextBytesNotMatchingSet(setName)
+}
+
+// ReadFixedNumberOfBytes reads a number of bytes from the underlying byte slice equal to countOfBytesToRead.
+// If there are not enough bytes remaining past the cursor, then the return byte slice will contain (and be
+// the length of) the number of bytes remaining and the error will be io.EOF.
+func (nibbler *ByteSliceNibbler) ReadFixedNumberOfBytes(countOfBytesToRead uint) ([]byte, error) {
+	returnSlice := make([]byte, countOfBytesToRead)
+
+	for i := 0; i < int(countOfBytesToRead); i++ {
+		if len(nibbler.backingBuffer) <= nibbler.indexInBufferOfNextReadByte {
+			return returnSlice[:i], io.EOF
+		}
+
+		returnSlice[i] = nibbler.backingBuffer[nibbler.indexInBufferOfNextReadByte]
+		nibbler.indexInBufferOfNextReadByte++
+	}
+
+	return returnSlice, nil
 }
 
 // ByteReaderNibbler is a ByteNibbler that uses an io.Reader as its dynamic backing stream.
@@ -245,6 +264,24 @@ func (nibbler *ByteReaderNibbler) ReadNextBytesMatchingSet(setName string) ([]by
 // match the bytes in named set.
 func (nibbler *ByteReaderNibbler) ReadNextBytesNotMatchingSet(setName string) ([]byte, error) {
 	return nibbler.delegate.readNextBytesNotMatchingSet(setName)
+}
+
+// ReadFixedNumberOfBytes reads a number of bytes from the underlying byte slice equal to countOfBytesToRead.
+// If there are not enough bytes remaining past the cursor, then the return byte slice will contain (and be
+// the length of) the number of bytes remaining and the error will be io.EOF.
+func (nibbler *ByteReaderNibbler) ReadFixedNumberOfBytes(countOfBytesToRead uint) ([]byte, error) {
+	returnSlice := make([]byte, countOfBytesToRead)
+
+	for i := 0; i < int(countOfBytesToRead); i++ {
+		b, err := nibbler.ReadByte()
+		if err != nil {
+			return returnSlice[:i], err
+		}
+
+		returnSlice[i] = b
+	}
+
+	return returnSlice, nil
 }
 
 // The implementation of a ByteSliceNibbler and ByteReaderNibbler are mostly the same, except

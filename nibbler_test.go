@@ -10,18 +10,22 @@ import (
 	"github.com/blorticus/nibbler"
 )
 
-type nibblerExpectedResult struct {
+type nibblerTestCase interface {
+	runTestCaseAgainst(nibbler.ByteNibbler) error
+}
+
+type singleNibbleExpectedResult struct {
 	expectedByte  byte
 	expectAnError bool
 	expectEOF     bool
 }
 
-type nibblerTestCase struct {
+type singleNibbleTestCase struct {
 	operation      string // "ReadByte", "UnreadByte", "PeekAtNextByte"
-	expectedResult *nibblerExpectedResult
+	expectedResult *singleNibbleExpectedResult
 }
 
-func (testCase *nibblerTestCase) runTestCaseAgainst(nibber nibbler.ByteNibbler) (testCaseError error) {
+func (testCase *singleNibbleTestCase) runTestCaseAgainst(nibber nibbler.ByteNibbler) (testCaseError error) {
 	var err error
 	var b byte
 
@@ -68,10 +72,10 @@ func (testCase *nibblerTestCase) runTestCaseAgainst(nibber nibbler.ByteNibbler) 
 func TestByteSliceNibbler(t *testing.T) {
 	nib := nibbler.NewByteSliceNibbler([]byte{})
 
-	for testIndex, testCase := range []*nibblerTestCase{
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
-		{operation: "PeekAtNextByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
-		{operation: "UnreadByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: true, expectEOF: false}},
+	for testIndex, testCase := range []*singleNibbleTestCase{
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
+		{operation: "PeekAtNextByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
+		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: true, expectEOF: false}},
 	} {
 		if err := testCase.runTestCaseAgainst(nib); err != nil {
 			t.Errorf("(ByteSliceNibbler with Empty slice) (test %d) %s", testIndex+1, err.Error())
@@ -80,61 +84,66 @@ func TestByteSliceNibbler(t *testing.T) {
 	}
 
 	nib = nibbler.NewByteSliceNibbler([]byte{0, 1, 2, 3, 4, 5})
-	for testIndex, testCase := range []*nibblerTestCase{
-		{operation: "UnreadByte", expectedResult: &nibblerExpectedResult{expectAnError: true, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: false}},
-		{operation: "UnreadByte", expectedResult: &nibblerExpectedResult{expectAnError: false, expectEOF: false}},
-		{operation: "UnreadByte", expectedResult: &nibblerExpectedResult{expectAnError: true, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 1, expectAnError: false, expectEOF: false}},
-		{operation: "PeekAtNextByte", expectedResult: &nibblerExpectedResult{expectedByte: 2, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 2, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 3, expectAnError: false, expectEOF: false}},
-		{operation: "PeekAtNextByte", expectedResult: &nibblerExpectedResult{expectedByte: 4, expectAnError: false, expectEOF: false}},
-		{operation: "UnreadByte", expectedResult: &nibblerExpectedResult{expectAnError: false, expectEOF: false}},
-		{operation: "PeekAtNextByte", expectedResult: &nibblerExpectedResult{expectedByte: 3, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 3, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 4, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
-		{operation: "PeekAtNextByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
-		{operation: "UnreadByte", expectedResult: &nibblerExpectedResult{expectAnError: false, expectEOF: false}},
-		{operation: "PeekAtNextByte", expectedResult: &nibblerExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
+	for testIndex, testCase := range []*singleNibbleTestCase{
+		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: true, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: false}},
+		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: false, expectEOF: false}},
+		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: true, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 1, expectAnError: false, expectEOF: false}},
+		{operation: "PeekAtNextByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 2, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 2, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 3, expectAnError: false, expectEOF: false}},
+		{operation: "PeekAtNextByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 4, expectAnError: false, expectEOF: false}},
+		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: false, expectEOF: false}},
+		{operation: "PeekAtNextByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 3, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 3, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 4, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
+		{operation: "PeekAtNextByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
+		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: false, expectEOF: false}},
+		{operation: "PeekAtNextByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
 	} {
 		if err := testCase.runTestCaseAgainst(nib); err != nil {
 			t.Errorf("(ByteSliceNibbler with 6 values in slice) (test %d) %s", testIndex+1, err.Error())
 		}
-
 	}
+
+	// nib = nibbler.NewByteSliceNibbler([]byte{0, 1, 2, 3, 4, 5})
+	// returnedSlice, err := nib.ReadFixedNumberOfBytes(4)
+	// if err != nil {
+
+	// }
 }
 
 func TestByteReaderNibbler(t *testing.T) {
 	reader := mock.NewReader().AddGoodRead([]byte{0, 1, 2, 3}).AddGoodRead([]byte{4, 5}).AddEOF()
 	nibbler := nibbler.NewByteReaderNibbler(reader)
-	for testIndex, testCase := range []*nibblerTestCase{
-		{operation: "UnreadByte", expectedResult: &nibblerExpectedResult{expectAnError: true, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: false}},
-		{operation: "UnreadByte", expectedResult: &nibblerExpectedResult{expectAnError: false, expectEOF: false}},
-		{operation: "UnreadByte", expectedResult: &nibblerExpectedResult{expectAnError: true, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 1, expectAnError: false, expectEOF: false}},
-		{operation: "PeekAtNextByte", expectedResult: &nibblerExpectedResult{expectedByte: 2, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 2, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 3, expectAnError: false, expectEOF: false}},
-		{operation: "PeekAtNextByte", expectedResult: &nibblerExpectedResult{expectedByte: 4, expectAnError: false, expectEOF: false}},
-		{operation: "UnreadByte", expectedResult: &nibblerExpectedResult{expectAnError: false, expectEOF: false}},
-		{operation: "PeekAtNextByte", expectedResult: &nibblerExpectedResult{expectedByte: 3, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 3, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 4, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
-		{operation: "PeekAtNextByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
-		{operation: "UnreadByte", expectedResult: &nibblerExpectedResult{expectAnError: false, expectEOF: false}},
-		{operation: "PeekAtNextByte", expectedResult: &nibblerExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
-		{operation: "ReadByte", expectedResult: &nibblerExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
+	for testIndex, testCase := range []*singleNibbleTestCase{
+		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: true, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: false}},
+		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: false, expectEOF: false}},
+		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: true, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 1, expectAnError: false, expectEOF: false}},
+		{operation: "PeekAtNextByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 2, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 2, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 3, expectAnError: false, expectEOF: false}},
+		{operation: "PeekAtNextByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 4, expectAnError: false, expectEOF: false}},
+		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: false, expectEOF: false}},
+		{operation: "PeekAtNextByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 3, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 3, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 4, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
+		{operation: "PeekAtNextByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
+		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: false, expectEOF: false}},
+		{operation: "PeekAtNextByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 5, expectAnError: false, expectEOF: false}},
+		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
 	} {
 		if err := testCase.runTestCaseAgainst(nibbler); err != nil {
 			t.Errorf("(ByteReaderNibbler with 6 values then EOF) (test %d) %s", testIndex+1, err.Error())
@@ -173,13 +182,13 @@ func (testCase *namedCharacterSetMatchTestCase) runTestCaseAgainstNibbler(nib ni
 			}
 
 			return nil
-		} else {
-			if testCase.expectEOF {
-				return fmt.Errorf("expected EOF, got error = (%s)", returnedError.Error())
-			}
-
-			return nil
 		}
+
+		if testCase.expectEOF {
+			return fmt.Errorf("expected EOF, got error = (%s)", returnedError.Error())
+		}
+
+		return nil
 	} else if testCase.expectEOF {
 		return fmt.Errorf("expected EOF, got no EOF")
 	} else if testCase.expectError {
