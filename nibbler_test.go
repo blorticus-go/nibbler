@@ -6,8 +6,8 @@ import (
 	"io"
 	"testing"
 
+	"github.com/blorticus-go/nibbler"
 	mock "github.com/blorticus/go-test-mocks"
-	"github.com/blorticus/nibbler"
 )
 
 type nibblerTestCase interface {
