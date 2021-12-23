@@ -1,4 +1,4 @@
-package nibbler
+package nibblers
 
 import (
 	"unicode/utf8"
@@ -54,8 +54,104 @@ type UTF8Nibbler interface {
 
 type UTF8StringNibbler struct{}
 
+func (nibbler *UTF8StringNibbler) ReadCaracter() (rune, error) {
+	return 0, nil
+}
+
+func (nibbler *UTF8StringNibbler) UnreadCharacter() error {
+	return nil
+}
+
+func (nibbler *UTF8StringNibbler) PeekAtNextCharacter() (rune, error) {
+	return 0, nil
+}
+
+func (nibbler *UTF8StringNibbler) AddNamedCharacterSetsMap(*NamedUnicodeCharacterSetsMap) {
+
+}
+
+func (nibbler *UTF8StringNibbler) ReadNextCharactersMatchingSet(setName string) ([]rune, error) {
+	return nil, nil
+}
+
+func (nibbler *UTF8StringNibbler) ReadNextCharactersNotMatchingSet(setName string) ([]rune, error) {
+	return nil, nil
+}
+
 type UTF8RuneSliceNibbler struct{}
+
+func (nibbler *UTF8RuneSliceNibbler) ReadCaracter() (rune, error) {
+	return 0, nil
+}
+
+func (nibbler *UTF8RuneSliceNibbler) UnreadCharacter() error {
+	return nil
+}
+
+func (nibbler *UTF8RuneSliceNibbler) PeekAtNextCharacter() (rune, error) {
+	return 0, nil
+}
+
+func (nibbler *UTF8RuneSliceNibbler) AddNamedCharacterSetsMap(*NamedUnicodeCharacterSetsMap) {
+
+}
+
+func (nibbler *UTF8RuneSliceNibbler) ReadNextCharactersMatchingSet(setName string) ([]rune, error) {
+	return nil, nil
+}
+
+func (nibbler *UTF8RuneSliceNibbler) ReadNextCharactersNotMatchingSet(setName string) ([]rune, error) {
+	return nil, nil
+}
 
 type UTF8ByteSliceibbler struct{}
 
+func (nibbler *UTF8ByteSliceibbler) ReadCaracter() (rune, error) {
+	return 0, nil
+}
+
+func (nibbler *UTF8ByteSliceibbler) UnreadCharacter() error {
+	return nil
+}
+
+func (nibbler *UTF8ByteSliceibbler) PeekAtNextCharacter() (rune, error) {
+	return 0, nil
+}
+
+func (nibbler *UTF8ByteSliceibbler) AddNamedCharacterSetsMap(*NamedUnicodeCharacterSetsMap) {
+
+}
+
+func (nibbler *UTF8ByteSliceibbler) ReadNextCharactersMatchingSet(setName string) ([]rune, error) {
+	return nil, nil
+}
+
+func (nibbler *UTF8ByteSliceibbler) ReadNextCharactersNotMatchingSet(setName string) ([]rune, error) {
+	return nil, nil
+}
+
 type UTF8ReaderNibbler struct{}
+
+func (nibbler *UTF8ReaderNibbler) ReadCaracter() (rune, error) {
+	return 0, nil
+}
+
+func (nibbler *UTF8ReaderNibbler) UnreadCharacter() error {
+	return nil
+}
+
+func (nibbler *UTF8ReaderNibbler) PeekAtNextCharacter() (rune, error) {
+	return 0, nil
+}
+
+func (nibbler *UTF8ReaderNibbler) AddNamedCharacterSetsMap(*NamedUnicodeCharacterSetsMap) {
+
+}
+
+func (nibbler *UTF8ReaderNibbler) ReadNextCharactersMatchingSet(setName string) ([]rune, error) {
+	return nil, nil
+}
+
+func (nibbler *UTF8ReaderNibbler) ReadNextCharactersNotMatchingSet(setName string) ([]rune, error) {
+	return nil, nil
+}

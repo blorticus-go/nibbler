@@ -1,4 +1,4 @@
-package nibbler
+package nibblers
 
 import (
 	"bufio"
@@ -6,49 +6,40 @@ import (
 	"io"
 )
 
-// NamedCharacterSetsMap stores sets of ASCII characters, associated with a name.  These can
+// NamedByteSetsMap stores sets of bytes, associated with a name.  These can
 // be provided to ByteNibblers when reading a string of characters from the input stream to
 // determine which characters are allowed as part of the read.
-type NamedCharacterSetsMap struct {
+type NamedByteSetsMap struct {
 	mapOfSetsByName map[string]map[byte]bool
 }
 
-// NewNamedCharacterSetsMap creates a new empty map.
-func NewNamedCharacterSetsMap() *NamedCharacterSetsMap {
-	return &NamedCharacterSetsMap{
+// NewNamedByteSetsMap creates a new empty map.
+func NewNamedByteSetsMap() *NamedByteSetsMap {
+	return &NamedByteSetsMap{
 		mapOfSetsByName: make(map[string]map[byte]bool),
 	}
 }
 
-// AddNamedCharacterSetFromString treats stringOfAsciiCharacters as a series of ASCII characters.
-// Any rune with a value greater than 255 is ignored.  The set is added to the SetsMap with the
+// AddNamedByteSetFromString treats stringOfBytes as a series of bytes.  The set is added to the SetsMap with the
 // provided name.
-func (setsMap *NamedCharacterSetsMap) AddNamedCharacterSetFromString(nameOfSet string, stringOfASCIICharacters string) *NamedCharacterSetsMap {
-	mapOfCharacters := make(map[byte]bool)
-	for _, char := range stringOfASCIICharacters {
-		if char > 0 && char < 255 {
-			mapOfCharacters[byte(char)] = true
-		}
+func (setsMap *NamedByteSetsMap) AddNamedByteSetFromString(nameOfSet string, stringOfBytes string) *NamedByteSetsMap {
+	return setsMap.AddNamedByteSetFromByteArray(nameOfSet, []byte(stringOfBytes))
+}
+
+// AddNamedByteSetFromByteArray adds the bytes in byteArray as a byte set with the provided name.
+func (setsMap *NamedByteSetsMap) AddNamedByteSetFromByteArray(nameOfSet string, byteArray []byte) *NamedByteSetsMap {
+	mapOfBytes := make(map[byte]bool)
+
+	for _, nextByte := range byteArray {
+		mapOfBytes[nextByte] = true
 	}
 
-	setsMap.mapOfSetsByName[nameOfSet] = mapOfCharacters
+	setsMap.mapOfSetsByName[nameOfSet] = mapOfBytes
 
 	return setsMap
 }
 
-// AddNamedCharacterSetFromByteArray adds the bytes in byteArray as a character set with the provided name.
-func (setsMap *NamedCharacterSetsMap) AddNamedCharacterSetFromByteArray(nameOfSet string, byteArray []byte) *NamedCharacterSetsMap {
-	mapOfCharacters := make(map[byte]bool)
-	for _, char := range byteArray {
-		mapOfCharacters[byte(char)] = true
-	}
-
-	setsMap.mapOfSetsByName[nameOfSet] = mapOfCharacters
-
-	return setsMap
-}
-
-func (setsMap *NamedCharacterSetsMap) retrieveNamedCharacterSet(nameOfSet string) map[byte]bool {
+func (setsMap *NamedByteSetsMap) retrieveNamedCharacterSet(nameOfSet string) map[byte]bool {
 	return setsMap.mapOfSetsByName[nameOfSet]
 }
 
@@ -60,7 +51,7 @@ type ByteNibbler interface {
 	ReadByte() (byte, error)
 	UnreadByte() error
 	PeekAtNextByte() (byte, error)
-	AddNamedCharacterSetsMap(*NamedCharacterSetsMap)
+	AddNamedByteSetsMap(*NamedByteSetsMap)
 	ReadNextBytesMatchingSet(setName string) ([]byte, error)
 	ReadNextBytesNotMatchingSet(setName string) ([]byte, error)
 	ReadFixedNumberOfBytes(countOfBytesToRead uint) ([]byte, error)
@@ -87,8 +78,8 @@ func NewByteSliceNibbler(buffer []byte) *ByteSliceNibbler {
 	return nibbler
 }
 
-// AddNamedCharacterSetsMap receives a NamedCharacterSetsMap, to be used by ReadBytesFromSet().
-func (nibbler *ByteSliceNibbler) AddNamedCharacterSetsMap(setsMap *NamedCharacterSetsMap) {
+// AddNamedByteSetsMap receives a NamedByteSetsMap, to be used by ReadBytesFromSet().
+func (nibbler *ByteSliceNibbler) AddNamedByteSetsMap(setsMap *NamedByteSetsMap) {
 	nibbler.delegate.namedCharacterSets = setsMap
 }
 
@@ -189,8 +180,8 @@ func NewByteReaderNibbler(streamReader io.Reader) *ByteReaderNibbler {
 	return reader
 }
 
-// AddNamedCharacterSetsMap receives a NamedCharacterSetsMap, to be used by ReadBytesFromSet().
-func (nibbler *ByteReaderNibbler) AddNamedCharacterSetsMap(setsMap *NamedCharacterSetsMap) {
+// AddNamedByteSetsMap receives a NamedCharacterSetsMap, to be used by ReadBytesFromSet().
+func (nibbler *ByteReaderNibbler) AddNamedByteSetsMap(setsMap *NamedByteSetsMap) {
 	nibbler.delegate.addNamedCharacterSetsMap(setsMap)
 }
 
@@ -288,7 +279,7 @@ func (nibbler *ByteReaderNibbler) ReadFixedNumberOfBytes(countOfBytesToRead uint
 // for the actual per-byte stream manipulation function.  This underlying type is used by both
 // which then use composition to delegate the common functions.
 type byteNibblerDelegate struct {
-	namedCharacterSets *NamedCharacterSetsMap
+	namedCharacterSets *NamedByteSetsMap
 	actualNibbler      ByteNibbler
 }
 
@@ -299,7 +290,7 @@ func newByteNibblerDelegate(delegatingFor ByteNibbler) *byteNibblerDelegate {
 	}
 }
 
-func (delegate *byteNibblerDelegate) addNamedCharacterSetsMap(setMap *NamedCharacterSetsMap) {
+func (delegate *byteNibblerDelegate) addNamedCharacterSetsMap(setMap *NamedByteSetsMap) {
 	delegate.namedCharacterSets = setMap
 }
 

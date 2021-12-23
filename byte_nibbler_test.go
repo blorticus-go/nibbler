@@ -1,4 +1,4 @@
-package nibbler_test
+package nibblers_test
 
 import (
 	"bytes"
@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	mock "github.com/blorticus/go-test-mocks"
-	"github.com/blorticus/nibbler"
+	nibblers "github.com/blorticus/nibblers"
 )
 
 type nibblerTestCase interface {
-	runTestCaseAgainst(nibbler.ByteNibbler) error
+	runTestCaseAgainst(nibblers.ByteNibbler) error
 }
 
 type singleNibbleExpectedResult struct {
@@ -25,7 +25,7 @@ type singleNibbleTestCase struct {
 	expectedResult *singleNibbleExpectedResult
 }
 
-func (testCase *singleNibbleTestCase) runTestCaseAgainst(nibber nibbler.ByteNibbler) (testCaseError error) {
+func (testCase *singleNibbleTestCase) runTestCaseAgainst(nibber nibblers.ByteNibbler) (testCaseError error) {
 	var err error
 	var b byte
 
@@ -70,7 +70,7 @@ func (testCase *singleNibbleTestCase) runTestCaseAgainst(nibber nibbler.ByteNibb
 }
 
 func TestByteSliceNibbler(t *testing.T) {
-	nib := nibbler.NewByteSliceNibbler([]byte{})
+	nib := nibblers.NewByteSliceNibbler([]byte{})
 
 	for testIndex, testCase := range []*singleNibbleTestCase{
 		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: true}},
@@ -83,7 +83,7 @@ func TestByteSliceNibbler(t *testing.T) {
 
 	}
 
-	nib = nibbler.NewByteSliceNibbler([]byte{0, 1, 2, 3, 4, 5})
+	nib = nibblers.NewByteSliceNibbler([]byte{0, 1, 2, 3, 4, 5})
 	for testIndex, testCase := range []*singleNibbleTestCase{
 		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: true, expectEOF: false}},
 		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: false}},
@@ -111,17 +111,11 @@ func TestByteSliceNibbler(t *testing.T) {
 			t.Errorf("(ByteSliceNibbler with 6 values in slice) (test %d) %s", testIndex+1, err.Error())
 		}
 	}
-
-	// nib = nibbler.NewByteSliceNibbler([]byte{0, 1, 2, 3, 4, 5})
-	// returnedSlice, err := nib.ReadFixedNumberOfBytes(4)
-	// if err != nil {
-
-	// }
 }
 
 func TestByteReaderNibbler(t *testing.T) {
 	reader := mock.NewReader().AddGoodRead([]byte{0, 1, 2, 3}).AddGoodRead([]byte{4, 5}).AddEOF()
-	nibbler := nibbler.NewByteReaderNibbler(reader)
+	nibbler := nibblers.NewByteReaderNibbler(reader)
 	for testIndex, testCase := range []*singleNibbleTestCase{
 		{operation: "UnreadByte", expectedResult: &singleNibbleExpectedResult{expectAnError: true, expectEOF: false}},
 		{operation: "ReadByte", expectedResult: &singleNibbleExpectedResult{expectedByte: 0, expectAnError: false, expectEOF: false}},
@@ -160,7 +154,7 @@ type namedCharacterSetMatchTestCase struct {
 	expectedReturnedBytes []byte
 }
 
-func (testCase *namedCharacterSetMatchTestCase) runTestCaseAgainstNibbler(nib nibbler.ByteNibbler) error {
+func (testCase *namedCharacterSetMatchTestCase) runTestCaseAgainstNibbler(nib nibblers.ByteNibbler) error {
 	var returnedBytes []byte
 	var returnedError error
 
@@ -243,11 +237,11 @@ func byteSliceToSanitizedString(preStream []byte) string {
 }
 
 // test against stream: "abc \tD12\r21D "
-func testAnyByteNibblerForNamedSetMatchers(byteNibbler nibbler.ByteNibbler, baseTestName string, t *testing.T) {
-	byteSetMap := nibbler.NewNamedCharacterSetsMap().
-		AddNamedCharacterSetFromString("set-abcdefg", "abcdefg").
-		AddNamedCharacterSetFromByteArray("set-12", []byte{'1', '2'}).
-		AddNamedCharacterSetFromString("set-whitespace", " \t\r\n")
+func testAnyByteNibblerForNamedSetMatchers(byteNibbler nibblers.ByteNibbler, baseTestName string, t *testing.T) {
+	byteSetMap := nibblers.NewNamedByteSetsMap().
+		AddNamedByteSetFromString("set-abcdefg", "abcdefg").
+		AddNamedByteSetFromByteArray("set-12", []byte{'1', '2'}).
+		AddNamedByteSetFromString("set-whitespace", " \t\r\n")
 
 	testCases := []*namedCharacterSetMatchTestCase{
 		{matchType: "matching", setName: "foo", expectError: true},
@@ -278,7 +272,7 @@ func testAnyByteNibblerForNamedSetMatchers(byteNibbler nibbler.ByteNibbler, base
 		t.Errorf("(%s) (before adding CharacterSetMap) expected error on ReadNextBytesNotMatchingSet, got no error", baseTestName)
 	}
 
-	byteNibbler.AddNamedCharacterSetsMap(byteSetMap)
+	byteNibbler.AddNamedByteSetsMap(byteSetMap)
 
 	for testCaseIndex, testCase := range testCases {
 		if err := testCase.runTestCaseAgainstNibbler(byteNibbler); err != nil {
@@ -288,7 +282,7 @@ func testAnyByteNibblerForNamedSetMatchers(byteNibbler nibbler.ByteNibbler, base
 }
 
 func TestByteSliceNibblerNamedSet(t *testing.T) {
-	byteSliceNibbler := nibbler.NewByteSliceNibbler([]byte("abc \tD12\r21D "))
+	byteSliceNibbler := nibblers.NewByteSliceNibbler([]byte("abc \tD12\r21D "))
 	testAnyByteNibblerForNamedSetMatchers(byteSliceNibbler, "TestByteSliceNibblerNamedSet", t)
 }
 
@@ -301,7 +295,7 @@ func TestByteReaderNibblerNamedSet(t *testing.T) {
 		AddGoodRead([]byte(completeStream[12:13])).
 		AddEOF()
 
-	byteReaderNibbler := nibbler.NewByteReaderNibbler(reader)
+	byteReaderNibbler := nibblers.NewByteReaderNibbler(reader)
 	testAnyByteNibblerForNamedSetMatchers(byteReaderNibbler, "TestByteSliceNibblerNamedSet", t)
 }
 
@@ -318,14 +312,14 @@ func TestByteReaderNibblerNamedSetWithEmptyRead(t *testing.T) {
 		AddGoodRead([]byte(completeStream[12:13])).
 		AddEOF()
 
-	byteNibbler := nibbler.NewByteReaderNibbler(reader)
+	byteNibbler := nibblers.NewByteReaderNibbler(reader)
 
-	byteSetMap := nibbler.NewNamedCharacterSetsMap().
-		AddNamedCharacterSetFromString("set-abcdefg", "abcdefg").
-		AddNamedCharacterSetFromByteArray("set-12", []byte{'1', '2'}).
-		AddNamedCharacterSetFromString("set-whitespace", " \t\r\n")
+	byteSetMap := nibblers.NewNamedByteSetsMap().
+		AddNamedByteSetFromString("set-abcdefg", "abcdefg").
+		AddNamedByteSetFromByteArray("set-12", []byte{'1', '2'}).
+		AddNamedByteSetFromString("set-whitespace", " \t\r\n")
 
-	byteNibbler.AddNamedCharacterSetsMap(byteSetMap)
+	byteNibbler.AddNamedByteSetsMap(byteSetMap)
 
 	testCases := []*namedCharacterSetMatchTestCase{
 		{matchType: "matching", setName: "set-12", expectedReturnedBytes: []byte{}},
