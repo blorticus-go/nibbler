@@ -3,59 +3,11 @@ package nibblers
 import (
 	"fmt"
 	"io"
+	"unicode"
 	"unicode/utf8"
+
+	"github.com/blorticus-go/stack"
 )
-
-type simpleSizeConstrainedStackOfUints struct {
-	underlyingSlice   []uint
-	indexOfHead       int
-	currentStackDepth int
-	maxStackDepth     int
-}
-
-func newSimpleSizeConstrainedStackOfUints(maximuimStackLength uint) *simpleSizeConstrainedStackOfUints {
-	if maximuimStackLength < 2 {
-		panic("simpleSizeConstrainedStackOfUints length must be at least 2")
-	}
-
-	return &simpleSizeConstrainedStackOfUints{
-		underlyingSlice:   make([]uint, maximuimStackLength),
-		indexOfHead:       -1,
-		maxStackDepth:     int(maximuimStackLength),
-		currentStackDepth: 0,
-	}
-}
-
-func (stack *simpleSizeConstrainedStackOfUints) Push(value uint) {
-	if stack.indexOfHead == stack.maxStackDepth-1 {
-		stack.indexOfHead = 0
-	} else {
-		stack.indexOfHead++
-	}
-
-	stack.underlyingSlice[stack.indexOfHead] = value
-
-	if stack.currentStackDepth < stack.maxStackDepth {
-		stack.currentStackDepth++
-	}
-}
-
-func (stack *simpleSizeConstrainedStackOfUints) Pop() (value uint, stackIsAlreadyEmpty bool) {
-	if stack.currentStackDepth == 0 {
-		return 0, true
-	}
-
-	value = stack.underlyingSlice[stack.indexOfHead]
-	if stack.indexOfHead == 0 {
-		stack.indexOfHead = len(stack.underlyingSlice) - 1
-	} else {
-		stack.indexOfHead--
-	}
-
-	stack.currentStackDepth--
-
-	return value, false
-}
 
 type NamedUnicodeCharacterSetsMap struct {
 	mapOfSetsByName map[string]map[rune]bool
@@ -96,24 +48,35 @@ func (setsMap *NamedUnicodeCharacterSetsMap) AddNamedUnicodeCharacterSetFromRune
 	return setsMap
 }
 
+type CharacterMatchingFunction func(r rune) (runeMatches bool)
+
 type UTF8Nibbler interface {
 	ReadCaracter() (rune, error)
 	UnreadCharacter() error
 	PeekAtNextCharacter() (rune, error)
-	AddNamedCharacterSetsMap(*NamedUnicodeCharacterSetsMap)
-	ReadNextCharactersMatchingSet(setName string) ([]rune, error)
-	ReadNextCharactersNotMatchingSet(setName string) ([]rune, error)
+	ReadCharactersMatching(matcher CharacterMatchingFunction) ([]rune, error)
+	ReadCharactersNotMatching(matcher CharacterMatchingFunction) ([]rune, error)
+	ReadCharactersMatchingInto(matcher CharacterMatchingFunction, receiver []rune) error
+	ReadCharactersNotMatchingInto(matcher CharacterMatchingFunction, receiver []rune) error
+	ReadConsecutiveWhitespace() ([]rune, error)
+	ReadConsecutiveWhitespaceInto(receiver []rune) error
+	ReadConsecutiveWordCharacters() ([]rune, error)
+	ReadConsecutiveWordCharactersInto([]rune) error
 }
 
 type UTF8StringNibbler struct {
-	backingString               string
-	indexInStringOfNextReadByte int
+	backingString                      string
+	indexInStringOfNextReadByte        int
+	stackOfLastTenCharacterByteLengths *stack.Stack
+	namedCharacterSetsMap              *NamedUnicodeCharacterSetsMap
 }
 
 func NewUTF8StringNibbler(nibbleString string) *UTF8StringNibbler {
 	return &UTF8StringNibbler{
-		backingString:               nibbleString,
-		indexInStringOfNextReadByte: 0,
+		backingString:                      nibbleString,
+		indexInStringOfNextReadByte:        0,
+		stackOfLastTenCharacterByteLengths: stack.NewBoundedDiscardingStack(10),
+		namedCharacterSetsMap:              nil,
 	}
 }
 
@@ -128,27 +91,183 @@ func (nibbler *UTF8StringNibbler) ReadCaracter() (rune, error) {
 	}
 
 	nibbler.indexInStringOfNextReadByte += sizeOfCharacterInBytes
+	nibbler.stackOfLastTenCharacterByteLengths.Push(sizeOfCharacterInBytes)
 	return nextCharacter, nil
 }
 
 func (nibbler *UTF8StringNibbler) UnreadCharacter() error {
+	sizeOfLastReadRune, stackWasEmptyBeforeRead := nibbler.stackOfLastTenCharacterByteLengths.PopInt()
+	if stackWasEmptyBeforeRead {
+		return fmt.Errorf("Already at the start of the stream")
+	}
+
+	nibbler.indexInStringOfNextReadByte -= sizeOfLastReadRune
 	return nil
 }
 
 func (nibbler *UTF8StringNibbler) PeekAtNextCharacter() (rune, error) {
-	return 0, nil
+	if nibbler.indexInStringOfNextReadByte >= len(nibbler.backingString) {
+		return 0, io.EOF
+	}
+
+	nextCharacter, _ := utf8.DecodeRuneInString(nibbler.backingString[nibbler.indexInStringOfNextReadByte:])
+	if nextCharacter == utf8.RuneError {
+		return 0, fmt.Errorf("Invalid UTF-8 string element")
+	}
+
+	return nextCharacter, nil
 }
 
-func (nibbler *UTF8StringNibbler) AddNamedCharacterSetsMap(*NamedUnicodeCharacterSetsMap) {
-
+func (nibbler *UTF8StringNibbler) AddNamedCharacterSetsMap(setsMap *NamedUnicodeCharacterSetsMap) {
+	nibbler.namedCharacterSetsMap = setsMap
 }
 
 func (nibbler *UTF8StringNibbler) ReadNextCharactersMatchingSet(setName string) ([]rune, error) {
-	return nil, nil
+	if nibbler.namedCharacterSetsMap == nil {
+		return nil, fmt.Errorf("No NamedCharacterSetsMap defined")
+	}
+
+	set, setIsInMap := nibbler.namedCharacterSetsMap.mapOfSetsByName[setName]
+	if !setIsInMap {
+		return nil, fmt.Errorf("No set named (%s) in associated NamedCharacterSetsMap", setName)
+	}
+
+	matchingRunes := make([]rune, 0, 10)
+	for {
+		nextRune, err := nibbler.ReadCaracter()
+		if err != nil {
+			return matchingRunes, err
+		}
+
+		if _, runeIsInMap := set[nextRune]; !runeIsInMap {
+			nibbler.UnreadCharacter()
+			return matchingRunes, nil
+		}
+
+		matchingRunes = append(matchingRunes, nextRune)
+	}
 }
 
 func (nibbler *UTF8StringNibbler) ReadNextCharactersNotMatchingSet(setName string) ([]rune, error) {
-	return nil, nil
+	if nibbler.namedCharacterSetsMap == nil {
+		return nil, fmt.Errorf("No NamedCharacterSetsMap defined")
+	}
+
+	set, setIsInMap := nibbler.namedCharacterSetsMap.mapOfSetsByName[setName]
+	if !setIsInMap {
+		return nil, fmt.Errorf("No set named (%s) in associated NamedCharacterSetsMap", setName)
+	}
+
+	matchingRunes := make([]rune, 0, 10)
+	for {
+		nextRune, err := nibbler.ReadCaracter()
+		if err != nil {
+			return matchingRunes, err
+		}
+
+		if _, runeIsInMap := set[nextRune]; runeIsInMap {
+			nibbler.UnreadCharacter()
+			return matchingRunes, nil
+		}
+
+		matchingRunes = append(matchingRunes, nextRune)
+	}
+}
+
+func runeIsWhitespace(r rune) bool {
+	return unicode.IsSpace(r)
+}
+
+func (nibbler *UTF8StringNibbler) ReadCharactersMatching(matcher CharacterMatchingFunction) ([]rune, error) {
+	matchingRunes := make([]rune, 0, 10)
+
+	for {
+		nextRune, err := nibbler.ReadCaracter()
+		if err != nil {
+			return matchingRunes, err
+		}
+
+		if matcher(nextRune) {
+			matchingRunes = append(matchingRunes, nextRune)
+		} else {
+			nibbler.UnreadCharacter()
+			return matchingRunes, nil
+		}
+	}
+}
+
+func (nibbler *UTF8StringNibbler) ReadCharactersNotMatching(matcher CharacterMatchingFunction) ([]rune, error) {
+	nonMatchingRunes := make([]rune, 0, 10)
+
+	for {
+		nextRune, err := nibbler.ReadCaracter()
+		if err != nil {
+			return nonMatchingRunes, err
+		}
+
+		if !matcher(nextRune) {
+			nonMatchingRunes = append(nonMatchingRunes, nextRune)
+		} else {
+			nibbler.UnreadCharacter()
+			return nonMatchingRunes, nil
+		}
+	}
+}
+
+func (nibbler *UTF8StringNibbler) ReadCharactersMatchingInto(matcher CharacterMatchingFunction, receiver []rune) error {
+	for i := 0; i < len(receiver); i++ {
+		nextRune, err := nibbler.ReadCaracter()
+		if err != nil {
+			receiver = receiver[:i-1]
+			return err
+		}
+
+		if matcher(nextRune) {
+			receiver[i] = nextRune
+		} else {
+			nibbler.UnreadCharacter()
+			receiver = receiver[:i-1]
+			return nil
+		}
+	}
+
+	return nil
+}
+
+func (nibbler *UTF8StringNibbler) ReadCharactersNotMatchingInto(matcher CharacterMatchingFunction, receiver []rune) error {
+	for i := 0; i < len(receiver); i++ {
+		nextRune, err := nibbler.ReadCaracter()
+		if err != nil {
+			receiver = receiver[:i-1]
+			return err
+		}
+
+		if !matcher(nextRune) {
+			receiver[i] = nextRune
+		} else {
+			nibbler.UnreadCharacter()
+			receiver = receiver[:i-1]
+			return nil
+		}
+	}
+
+	return nil
+}
+
+func (nibbler *UTF8StringNibbler) ReadConsecutiveWhitespace() ([]rune, error) {
+	return nibbler.ReadCharactersMatching(runeIsWhitespace)
+}
+
+func (nibbler *UTF8StringNibbler) ReadConsecutiveWhitespaceInto(receiver []rune) error {
+	return nibbler.ReadCharactersMatchingInto(runeIsWhitespace, receiver)
+}
+
+func (nibbler *UTF8StringNibbler) ReadConsecutiveWordCharacters() ([]rune, error) {
+	return nibbler.ReadCharactersNotMatching(runeIsWhitespace)
+}
+
+func (nibbler *UTF8StringNibbler) ReadConsecutiveWordCharactersInto(receiver []rune) error {
+	return nibbler.ReadCharactersNotMatchingInto(runeIsWhitespace, receiver)
 }
 
 type UTF8RuneSliceNibbler struct{}
