@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/blorticus/nibblers"
 )
@@ -118,18 +119,137 @@ func compareTwoRuneSlices(expectedRunes []rune, gotRunes []rune) error {
 	return nil
 }
 
+func stringToRuneSlice(s string) []rune {
+	r := make([]rune, 0, utf8.RuneCountInString(s))
+
+	for i := 0; i < len(s); {
+		nextRune, runeLengthInBytes := utf8.DecodeRuneInString(s[i:])
+		i += runeLengthInBytes
+		r = append(r, nextRune)
+	}
+
+	return r
+}
+
 func TestUTF8StringNibbler(t *testing.T) {
-	runeString := "∀∁∂∃ ∄ ∅∆∇\t ∈∉∊  \r    ∋∌∍∎∏  +-  ∀∁∂∃ ∄ ∅∆∇\t ∈∉∊ ∀∁∂∃ ∄ ∅∆∇\t ∈∉∊     ∀∁∂∃ ∄ ∅∆∇\t ∈∉∊ \t∀∁∂∃ ∄ ∅∆∇\t ∈∉∊ "
+	runeString := "∀∁∂∃ ∄ ∅∆∇\t a∉∊  \r    ∋c∍∎\\  +-  ∀∁∂∃ ∄ ∅∆∇\t ∈∉∊ ∀∁∂∃ \n"
 
 	nibbler := nibblers.NewUTF8StringNibbler(runeString)
 	for _, testCase := range []*utf8NibblerTestCase{
 		{testname: "First read from string", operation: "Read", expectedReadOrPeekRune: '∀'},
+		{testname: "First peek from string", operation: "Peek", expectedReadOrPeekRune: '∁'},
 		{testname: "First read whitesapce from string", operation: "Whitespace", expectedRuneSet: []rune{}},
 		{testname: "First unread from string", operation: "Unread"},
 		{testname: "Second unread from string", operation: "Unread", expectAnErrorThatIsNotEOF: true},
+		{testname: "Second peek from string", operation: "Peek", expectedReadOrPeekRune: '∀'},
+		{testname: "First read words from string", operation: "Words", expectedRuneSet: []rune{'∀', '∁', '∂', '∃'}},
+		{testname: "Third peek from string", operation: "Peek", expectedReadOrPeekRune: ' '},
+		{testname: "Second read whitesapce from string", operation: "Whitespace", expectedRuneSet: []rune{' '}},
+		{testname: "Third unread from string", operation: "Unread"},
+		{testname: "Fourth peek from string", operation: "Peek", expectedReadOrPeekRune: ' '},
+		{testname: "Second read words from string", operation: "Words", expectedRuneSet: []rune{}},
+		{testname: "Third read whitesapce from string", operation: "Whitespace", expectedRuneSet: []rune{' '}},
 	} {
 		if expectationFailure := testCase.testAgainstNibbler(nibbler); expectationFailure != nil {
 			t.Errorf("[%s] %s", testCase.testname, expectationFailure.Error())
 		}
 	}
+
+	for testIndex, expectedWordsThenSpaces := range [][][]rune{
+		{{'∄'}, {' '}},
+		{{'∅', '∆', '∇'}, {'\t', ' '}},
+		{{'a', '∉', '∊'}, {' ', ' ', '\r', ' ', ' ', ' ', ' '}},
+	} {
+		expectedWords := expectedWordsThenSpaces[0]
+		expectedWhitespace := expectedWordsThenSpaces[1]
+
+		runes, err := nibbler.ReadConsecutiveWordCharacters()
+		if err != nil {
+			t.Errorf("[Alternating word/space Test Index %d] on ReadConsecutiveWorCharacters() expected no error, got err = (%s)", testIndex, err.Error())
+		}
+
+		if err := compareTwoRuneSlices(expectedWords, runes); err != nil {
+			t.Errorf("[Alternating word/space Test Index %d] on ReadConsecutiveWorCharacters() %s", testIndex, err.Error())
+		}
+
+		runes, err = nibbler.ReadConsecutiveWhitespace()
+		if err != nil {
+			t.Errorf("[Alternating word/space Test Index %d] on ReadConsecutiveWhitespace() expected no error, got err = (%s)", testIndex, err.Error())
+		}
+
+		if err := compareTwoRuneSlices(expectedWhitespace, runes); err != nil {
+			t.Errorf("[Alternating word/space Test Index %d] on ReadConsecutiveWhitespace() %s", testIndex, err.Error())
+		}
+	}
+
+	f := func(r rune) bool {
+		return r == '\t'
+	}
+
+	runes, err := nibbler.ReadCharactersNotMatching(f)
+	if err != nil {
+		t.Errorf("[ReadCharactersNotMatching(\\t)] expected no error, got error = (%s)", err.Error())
+	}
+
+	if err := compareTwoRuneSlices(stringToRuneSlice("∋c∍∎\\  +-  ∀∁∂∃ ∄ ∅∆∇"), runes); err != nil {
+		t.Errorf("[ReadCharactersNotMatching(\\t)] %s", err.Error())
+	}
+
+	runes, err = nibbler.ReadCharactersNotMatching(f)
+	if err != nil {
+		t.Errorf("[Second ReadCharactersNotMatching(\\t)] expected no error, got error = (%s)", err.Error())
+	}
+
+	if err := compareTwoRuneSlices([]rune{}, runes); err != nil {
+		t.Errorf("[Second ReadCharactersNotMatching(\\t)] %s", err.Error())
+	}
+
+	f = func(r rune) bool {
+		switch r {
+		case ' ':
+			return true
+		case '∈':
+			return true
+		case '∉':
+			return true
+		case '∊':
+			return true
+		case 't':
+			return true
+		case '\r':
+			return true
+		case '\t':
+			return true
+		default:
+			return false
+		}
+	}
+
+	runes, err = nibbler.ReadCharactersMatching(f)
+	if err != nil {
+		t.Errorf("[ReadCharactersMatching()] expected no error, got error = (%s)", err.Error())
+	}
+
+	if err := compareTwoRuneSlices(stringToRuneSlice("\t ∈∉∊ "), runes); err != nil {
+		t.Errorf("[ReadCharactersMatching()] %s", err.Error())
+	}
+
+	runes, err = nibbler.ReadCharactersMatching(f)
+	if err != nil {
+		t.Errorf("[Second ReadCharactersMatching()] expected no error, got error = (%s)", err.Error())
+	}
+
+	if err := compareTwoRuneSlices([]rune{}, runes); err != nil {
+		t.Errorf("[Second ReadCharactersMatching()] %s", err.Error())
+	}
+
+	for _, testCase := range []*utf8NibblerTestCase{
+		{testname: "Third read words from string", operation: "Words", expectedRuneSet: []rune{'∀', '∁', '∂', '∃'}},
+		{testname: "Fourth read whitesapce from string", operation: "Whitespace", expectedRuneSet: []rune{' ', '\n'}},
+	} {
+		if expectationFailure := testCase.testAgainstNibbler(nibbler); expectationFailure != nil {
+			t.Errorf("[%s] %s", testCase.testname, expectationFailure.Error())
+		}
+	}
+
 }
