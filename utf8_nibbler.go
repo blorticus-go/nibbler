@@ -5,48 +5,7 @@ import (
 	"io"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/blorticus-go/stack"
 )
-
-type NamedUnicodeCharacterSetsMap struct {
-	mapOfSetsByName map[string]map[rune]bool
-}
-
-func NewUnicodeCharacterSetsMap() *NamedUnicodeCharacterSetsMap {
-	return &NamedUnicodeCharacterSetsMap{
-		mapOfSetsByName: make(map[string]map[rune]bool),
-	}
-}
-
-func (setsMap *NamedUnicodeCharacterSetsMap) AddNamedUnicodeCharactersSetFromString(nameOfSet string, utf8CharacterSet string) *NamedUnicodeCharacterSetsMap {
-	mapOfCharacters := make(map[rune]bool)
-
-	characterSetAsByteArray := []byte(utf8CharacterSet)
-	var nextRune rune
-
-	for i, byteWidthOfRune := 0, 0; i < len(utf8CharacterSet); i += byteWidthOfRune {
-		if nextRune, byteWidthOfRune = utf8.DecodeRune(characterSetAsByteArray[i:]); nextRune == utf8.RuneError {
-			break
-		}
-		mapOfCharacters[nextRune] = true
-	}
-
-	setsMap.mapOfSetsByName[nameOfSet] = mapOfCharacters
-
-	return setsMap
-}
-
-func (setsMap *NamedUnicodeCharacterSetsMap) AddNamedUnicodeCharacterSetFromRuneArray(nameOfSet string, runearray []rune) *NamedUnicodeCharacterSetsMap {
-	mapOfCharacters := make(map[rune]bool)
-	for _, r := range runearray {
-		mapOfCharacters[r] = true
-	}
-
-	setsMap.mapOfSetsByName[nameOfSet] = mapOfCharacters
-
-	return setsMap
-}
 
 type CharacterMatchingFunction func(r rune) (runeMatches bool)
 
@@ -65,113 +24,59 @@ type UTF8Nibbler interface {
 }
 
 type UTF8StringNibbler struct {
-	backingString                      string
-	indexInStringOfNextReadByte        int
-	stackOfLastTenCharacterByteLengths *stack.Stack
-	namedCharacterSetsMap              *NamedUnicodeCharacterSetsMap
+	backingString               string
+	indexInStringOfNextReadByte int
 }
 
 func NewUTF8StringNibbler(nibbleString string) *UTF8StringNibbler {
 	return &UTF8StringNibbler{
-		backingString:                      nibbleString,
-		indexInStringOfNextReadByte:        0,
-		stackOfLastTenCharacterByteLengths: stack.NewBoundedDiscardingStack(10),
-		namedCharacterSetsMap:              nil,
+		backingString:               nibbleString,
+		indexInStringOfNextReadByte: 0,
 	}
 }
 
 func (nibbler *UTF8StringNibbler) ReadCaracter() (rune, error) {
 	if nibbler.indexInStringOfNextReadByte >= len(nibbler.backingString) {
-		return 0, io.EOF
+		return utf8.RuneError, io.EOF
 	}
 
 	nextCharacter, sizeOfCharacterInBytes := utf8.DecodeRuneInString(nibbler.backingString[nibbler.indexInStringOfNextReadByte:])
 	if nextCharacter == utf8.RuneError {
-		return 0, fmt.Errorf("Invalid UTF-8 string element")
+		return utf8.RuneError, fmt.Errorf("invalid UTF-8 string element")
 	}
 
 	nibbler.indexInStringOfNextReadByte += sizeOfCharacterInBytes
-	nibbler.stackOfLastTenCharacterByteLengths.Push(sizeOfCharacterInBytes)
 	return nextCharacter, nil
 }
 
 func (nibbler *UTF8StringNibbler) UnreadCharacter() error {
-	sizeOfLastReadRune, stackWasEmptyBeforeRead := nibbler.stackOfLastTenCharacterByteLengths.PopInt()
-	if stackWasEmptyBeforeRead {
-		return fmt.Errorf("Already at the start of the stream")
+	s := nibbler.backingString[:nibbler.indexInStringOfNextReadByte]
+	previousRune, sizeOfPreviousRune := utf8.DecodeLastRuneInString(s)
+
+	if previousRune == utf8.RuneError {
+		if sizeOfPreviousRune == 0 {
+			return fmt.Errorf("already at start of string")
+		}
+
+		return fmt.Errorf("invalid UTF-8 string element")
 	}
 
-	nibbler.indexInStringOfNextReadByte -= sizeOfLastReadRune
+	nibbler.indexInStringOfNextReadByte -= sizeOfPreviousRune
+
 	return nil
 }
 
 func (nibbler *UTF8StringNibbler) PeekAtNextCharacter() (rune, error) {
 	if nibbler.indexInStringOfNextReadByte >= len(nibbler.backingString) {
-		return 0, io.EOF
+		return utf8.RuneError, io.EOF
 	}
 
 	nextCharacter, _ := utf8.DecodeRuneInString(nibbler.backingString[nibbler.indexInStringOfNextReadByte:])
 	if nextCharacter == utf8.RuneError {
-		return 0, fmt.Errorf("Invalid UTF-8 string element")
+		return 0, fmt.Errorf("invalid UTF-8 string element")
 	}
 
 	return nextCharacter, nil
-}
-
-func (nibbler *UTF8StringNibbler) AddNamedCharacterSetsMap(setsMap *NamedUnicodeCharacterSetsMap) {
-	nibbler.namedCharacterSetsMap = setsMap
-}
-
-func (nibbler *UTF8StringNibbler) ReadNextCharactersMatchingSet(setName string) ([]rune, error) {
-	if nibbler.namedCharacterSetsMap == nil {
-		return nil, fmt.Errorf("No NamedCharacterSetsMap defined")
-	}
-
-	set, setIsInMap := nibbler.namedCharacterSetsMap.mapOfSetsByName[setName]
-	if !setIsInMap {
-		return nil, fmt.Errorf("No set named (%s) in associated NamedCharacterSetsMap", setName)
-	}
-
-	matchingRunes := make([]rune, 0, 10)
-	for {
-		nextRune, err := nibbler.ReadCaracter()
-		if err != nil {
-			return matchingRunes, err
-		}
-
-		if _, runeIsInMap := set[nextRune]; !runeIsInMap {
-			nibbler.UnreadCharacter()
-			return matchingRunes, nil
-		}
-
-		matchingRunes = append(matchingRunes, nextRune)
-	}
-}
-
-func (nibbler *UTF8StringNibbler) ReadNextCharactersNotMatchingSet(setName string) ([]rune, error) {
-	if nibbler.namedCharacterSetsMap == nil {
-		return nil, fmt.Errorf("No NamedCharacterSetsMap defined")
-	}
-
-	set, setIsInMap := nibbler.namedCharacterSetsMap.mapOfSetsByName[setName]
-	if !setIsInMap {
-		return nil, fmt.Errorf("No set named (%s) in associated NamedCharacterSetsMap", setName)
-	}
-
-	matchingRunes := make([]rune, 0, 10)
-	for {
-		nextRune, err := nibbler.ReadCaracter()
-		if err != nil {
-			return matchingRunes, err
-		}
-
-		if _, runeIsInMap := set[nextRune]; runeIsInMap {
-			nibbler.UnreadCharacter()
-			return matchingRunes, nil
-		}
-
-		matchingRunes = append(matchingRunes, nextRune)
-	}
 }
 
 func runeIsWhitespace(r rune) bool {
@@ -184,6 +89,14 @@ func (nibbler *UTF8StringNibbler) ReadCharactersMatching(matcher CharacterMatchi
 	for {
 		nextRune, err := nibbler.ReadCaracter()
 		if err != nil {
+			if err == io.EOF {
+				if len(matchingRunes) == 0 {
+					return nil, io.EOF
+				}
+
+				return matchingRunes, nil
+			}
+
 			return matchingRunes, err
 		}
 
@@ -284,18 +197,6 @@ func (nibbler *UTF8RuneSliceNibbler) PeekAtNextCharacter() (rune, error) {
 	return 0, nil
 }
 
-func (nibbler *UTF8RuneSliceNibbler) AddNamedCharacterSetsMap(*NamedUnicodeCharacterSetsMap) {
-
-}
-
-func (nibbler *UTF8RuneSliceNibbler) ReadNextCharactersMatchingSet(setName string) ([]rune, error) {
-	return nil, nil
-}
-
-func (nibbler *UTF8RuneSliceNibbler) ReadNextCharactersNotMatchingSet(setName string) ([]rune, error) {
-	return nil, nil
-}
-
 type UTF8ByteSliceibbler struct{}
 
 func (nibbler *UTF8ByteSliceibbler) ReadCaracter() (rune, error) {
@@ -310,18 +211,6 @@ func (nibbler *UTF8ByteSliceibbler) PeekAtNextCharacter() (rune, error) {
 	return 0, nil
 }
 
-func (nibbler *UTF8ByteSliceibbler) AddNamedCharacterSetsMap(*NamedUnicodeCharacterSetsMap) {
-
-}
-
-func (nibbler *UTF8ByteSliceibbler) ReadNextCharactersMatchingSet(setName string) ([]rune, error) {
-	return nil, nil
-}
-
-func (nibbler *UTF8ByteSliceibbler) ReadNextCharactersNotMatchingSet(setName string) ([]rune, error) {
-	return nil, nil
-}
-
 type UTF8ReaderNibbler struct{}
 
 func (nibbler *UTF8ReaderNibbler) ReadCaracter() (rune, error) {
@@ -334,10 +223,6 @@ func (nibbler *UTF8ReaderNibbler) UnreadCharacter() error {
 
 func (nibbler *UTF8ReaderNibbler) PeekAtNextCharacter() (rune, error) {
 	return 0, nil
-}
-
-func (nibbler *UTF8ReaderNibbler) AddNamedCharacterSetsMap(*NamedUnicodeCharacterSetsMap) {
-
 }
 
 func (nibbler *UTF8ReaderNibbler) ReadNextCharactersMatchingSet(setName string) ([]rune, error) {
