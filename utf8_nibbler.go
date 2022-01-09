@@ -15,12 +15,12 @@ type UTF8Nibbler interface {
 	PeekAtNextCharacter() (rune, error)
 	ReadCharactersMatching(matcher CharacterMatchingFunction) ([]rune, error)
 	ReadCharactersNotMatching(matcher CharacterMatchingFunction) ([]rune, error)
-	ReadCharactersMatchingInto(matcher CharacterMatchingFunction, receiver []rune) error
-	ReadCharactersNotMatchingInto(matcher CharacterMatchingFunction, receiver []rune) error
+	ReadCharactersMatchingInto(matcher CharacterMatchingFunction, receiver []rune) (int, error)
+	ReadCharactersNotMatchingInto(matcher CharacterMatchingFunction, receiver []rune) (int, error)
 	ReadConsecutiveWhitespace() ([]rune, error)
-	ReadConsecutiveWhitespaceInto(receiver []rune) error
+	ReadConsecutiveWhitespaceInto(receiver []rune) (int, error)
 	ReadConsecutiveWordCharacters() ([]rune, error)
-	ReadConsecutiveWordCharactersInto([]rune) error
+	ReadConsecutiveWordCharactersInto([]rune) (int, error)
 }
 
 type UTF8StringNibbler struct {
@@ -115,7 +115,12 @@ func (nibbler *UTF8StringNibbler) ReadCharactersNotMatching(matcher CharacterMat
 	for {
 		nextRune, err := nibbler.ReadCaracter()
 		if err != nil {
-			return nonMatchingRunes, err
+			if err == io.EOF {
+				if len(nonMatchingRunes) == 0 {
+					return nil, io.EOF
+				}
+			}
+			return nonMatchingRunes, nil
 		}
 
 		if !matcher(nextRune) {
@@ -127,51 +132,63 @@ func (nibbler *UTF8StringNibbler) ReadCharactersNotMatching(matcher CharacterMat
 	}
 }
 
-func (nibbler *UTF8StringNibbler) ReadCharactersMatchingInto(matcher CharacterMatchingFunction, receiver []rune) error {
+func (nibbler *UTF8StringNibbler) ReadCharactersMatchingInto(matcher CharacterMatchingFunction, receiver []rune) (int, error) {
 	for i := 0; i < len(receiver); i++ {
 		nextRune, err := nibbler.ReadCaracter()
 		if err != nil {
-			receiver = receiver[:i-1]
-			return err
+			if err == io.EOF {
+				if i == 0 {
+					return 0, io.EOF
+				}
+
+				return i, nil
+			}
+
+			return -1, err
 		}
 
 		if matcher(nextRune) {
 			receiver[i] = nextRune
 		} else {
 			nibbler.UnreadCharacter()
-			receiver = receiver[:i-1]
-			return nil
+			return i, nil
 		}
 	}
 
-	return nil
+	return len(receiver), nil
 }
 
-func (nibbler *UTF8StringNibbler) ReadCharactersNotMatchingInto(matcher CharacterMatchingFunction, receiver []rune) error {
+func (nibbler *UTF8StringNibbler) ReadCharactersNotMatchingInto(matcher CharacterMatchingFunction, receiver []rune) (int, error) {
 	for i := 0; i < len(receiver); i++ {
 		nextRune, err := nibbler.ReadCaracter()
 		if err != nil {
-			receiver = receiver[:i-1]
-			return err
+			if err == io.EOF {
+				if i == 0 {
+					return 0, io.EOF
+				}
+
+				return i, nil
+			}
+
+			return -1, err
 		}
 
 		if !matcher(nextRune) {
 			receiver[i] = nextRune
 		} else {
 			nibbler.UnreadCharacter()
-			receiver = receiver[:i-1]
-			return nil
+			return i, nil
 		}
 	}
 
-	return nil
+	return len(receiver), nil
 }
 
 func (nibbler *UTF8StringNibbler) ReadConsecutiveWhitespace() ([]rune, error) {
 	return nibbler.ReadCharactersMatching(runeIsWhitespace)
 }
 
-func (nibbler *UTF8StringNibbler) ReadConsecutiveWhitespaceInto(receiver []rune) error {
+func (nibbler *UTF8StringNibbler) ReadConsecutiveWhitespaceInto(receiver []rune) (int, error) {
 	return nibbler.ReadCharactersMatchingInto(runeIsWhitespace, receiver)
 }
 
@@ -179,7 +196,7 @@ func (nibbler *UTF8StringNibbler) ReadConsecutiveWordCharacters() ([]rune, error
 	return nibbler.ReadCharactersNotMatching(runeIsWhitespace)
 }
 
-func (nibbler *UTF8StringNibbler) ReadConsecutiveWordCharactersInto(receiver []rune) error {
+func (nibbler *UTF8StringNibbler) ReadConsecutiveWordCharactersInto(receiver []rune) (int, error) {
 	return nibbler.ReadCharactersNotMatchingInto(runeIsWhitespace, receiver)
 }
 

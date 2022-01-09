@@ -251,3 +251,117 @@ func TestUTF8StringNibbler(t *testing.T) {
 		}
 	}
 }
+
+type nibbleIntoTestCase struct {
+	operation                 string // "Matching", "NotMatching", "Words", "Whitespace" -- all are ...Into
+	matcherFunction           nibblers.CharacterMatchingFunction
+	expectedRuneSet           []rune
+	expectEOF                 bool
+	expectAnErrorThatIsNotEOF bool
+}
+
+func (testCase *nibbleIntoTestCase) testAgainstNibblerAndReceiver(nibbler nibblers.UTF8Nibbler, receiver []rune) error {
+	var runesReadIntoBuffer int
+	var err error
+
+	switch testCase.operation {
+	case "Matching":
+		runesReadIntoBuffer, err = nibbler.ReadCharactersMatchingInto(testCase.matcherFunction, receiver)
+
+	case "NotMatching":
+		runesReadIntoBuffer, err = nibbler.ReadCharactersNotMatchingInto(testCase.matcherFunction, receiver)
+
+	case "Words":
+		runesReadIntoBuffer, err = nibbler.ReadConsecutiveWordCharactersInto(receiver)
+
+	case "Whitespace":
+		runesReadIntoBuffer, err = nibbler.ReadConsecutiveWhitespaceInto(receiver)
+
+	default:
+		panic(fmt.Sprintf("test case operation (%s) not known", testCase.operation))
+	}
+
+	if err != nil {
+		if err == io.EOF {
+			if testCase.expectEOF {
+				return nil
+			}
+
+			return fmt.Errorf("expected error, got EOF")
+		}
+
+		if testCase.expectEOF {
+			return fmt.Errorf("expected EOF, got error = (%s)", err.Error())
+		}
+
+		if !testCase.expectAnErrorThatIsNotEOF {
+			return fmt.Errorf("expected no error, got error = (%s)", err.Error())
+		}
+
+		return nil
+	}
+
+	if len(testCase.expectedRuneSet) != runesReadIntoBuffer {
+		return fmt.Errorf("expected %d runes in buffer, got %d", len(testCase.expectedRuneSet), runesReadIntoBuffer)
+	}
+
+	if expectationFailure := compareTwoRuneSlices(testCase.expectedRuneSet, receiver[:runesReadIntoBuffer]); expectationFailure != nil {
+		return expectationFailure
+	}
+
+	return nil
+}
+
+func TestUTF8StringNibblerIntoMethods(t *testing.T) {
+	testString := "this    \t izz  schön but ∋c∍lylongin∀∁∂strings\r\n ok?"
+	nibbler := nibblers.NewUTF8StringNibbler(testString)
+
+	receiver := make([]rune, 5)
+
+	for testCaseIndex, testCase := range []nibbleIntoTestCase{
+		{operation: "Whitespace", expectedRuneSet: []rune{}},
+		{operation: "Words", expectedRuneSet: stringToRuneSlice("this")},
+		{operation: "Words", expectedRuneSet: []rune{}},
+		{operation: "Whitespace", expectedRuneSet: stringToRuneSlice("    \t")},
+		{operation: "Words", expectedRuneSet: []rune{}},
+		{operation: "Whitespace", expectedRuneSet: stringToRuneSlice(" ")},
+	} {
+		if expectationFailure := testCase.testAgainstNibblerAndReceiver(nibbler, receiver); expectationFailure != nil {
+			t.Errorf("[Test %d, %s] %s", testCaseIndex+1, testCase.operation, expectationFailure.Error())
+		}
+	}
+
+	e := func(r rune) bool {
+		switch r {
+		case ' ', 'i', 'z':
+			return true
+
+		default:
+			return false
+		}
+	}
+
+	f := func(r rune) bool {
+		return r == '\r'
+	}
+
+	g := func(r rune) bool {
+		return r != '"'
+	}
+
+	receiver = make([]rune, 10)
+	for testCaseIndex, testCase := range []nibbleIntoTestCase{
+		{operation: "Whitespace", expectedRuneSet: []rune{}},
+		{operation: "Matching", matcherFunction: e, expectedRuneSet: stringToRuneSlice("izz  ")},
+		{operation: "NotMatching", matcherFunction: f, expectedRuneSet: stringToRuneSlice("schön but ")},
+		{operation: "Words", matcherFunction: f, expectedRuneSet: stringToRuneSlice("∋c∍lylongi")},
+		{operation: "Words", matcherFunction: f, expectedRuneSet: stringToRuneSlice("n∀∁∂string")},
+		{operation: "NotMatching", matcherFunction: f, expectedRuneSet: stringToRuneSlice("s")},
+		{operation: "Matching", matcherFunction: g, expectedRuneSet: stringToRuneSlice("\r\n ok?")},
+	} {
+		if expectationFailure := testCase.testAgainstNibblerAndReceiver(nibbler, receiver); expectationFailure != nil {
+			t.Errorf("[Test %d, %s] %s", testCaseIndex+1, testCase.operation, expectationFailure.Error())
+		}
+	}
+
+}
