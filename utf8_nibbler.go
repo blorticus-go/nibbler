@@ -200,18 +200,43 @@ func (nibbler *UTF8StringNibbler) ReadConsecutiveWordCharactersInto(receiver []r
 	return nibbler.ReadCharactersNotMatchingInto(runeIsWhitespace, receiver)
 }
 
-type UTF8RuneSliceNibbler struct{}
+type UTF8RuneSliceNibbler struct {
+	backingSlice        []rune
+	indexOfLastReadRune int
+}
+
+func NewUTF8RuneSliceNibbler(runeSlice []rune) *UTF8RuneSliceNibbler {
+	return &UTF8RuneSliceNibbler{
+		backingSlice:        runeSlice,
+		indexOfLastReadRune: -1,
+	}
+}
 
 func (nibbler *UTF8RuneSliceNibbler) ReadCaracter() (rune, error) {
-	return 0, nil
+	if nibbler.indexOfLastReadRune == len(nibbler.backingSlice)-1 {
+		return utf8.RuneError, io.EOF
+	}
+
+	nibbler.indexOfLastReadRune++
+	return nibbler.backingSlice[nibbler.indexOfLastReadRune], nil
 }
 
 func (nibbler *UTF8RuneSliceNibbler) UnreadCharacter() error {
+	if nibbler.indexOfLastReadRune < 0 {
+		return fmt.Errorf("already at start of rune stream")
+	}
+
+	nibbler.indexOfLastReadRune--
+
 	return nil
 }
 
 func (nibbler *UTF8RuneSliceNibbler) PeekAtNextCharacter() (rune, error) {
-	return 0, nil
+	if nibbler.indexOfLastReadRune == len(nibbler.backingSlice)-1 {
+		return utf8.RuneError, io.EOF
+	}
+
+	return nibbler.backingSlice[nibbler.indexOfLastReadRune+1], nil
 }
 
 type UTF8ByteSliceibbler struct{}

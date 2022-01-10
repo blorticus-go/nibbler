@@ -358,6 +358,8 @@ func TestUTF8StringNibblerIntoMethods(t *testing.T) {
 		{operation: "Words", matcherFunction: f, expectedRuneSet: stringToRuneSlice("n∀∁∂string")},
 		{operation: "NotMatching", matcherFunction: f, expectedRuneSet: stringToRuneSlice("s")},
 		{operation: "Matching", matcherFunction: g, expectedRuneSet: stringToRuneSlice("\r\n ok?")},
+		{operation: "NotMatching", matcherFunction: f, expectEOF: true},
+		{operation: "Matching", matcherFunction: g, expectEOF: true},
 	} {
 		if expectationFailure := testCase.testAgainstNibblerAndReceiver(nibbler, receiver); expectationFailure != nil {
 			t.Errorf("[Test %d, %s] %s", testCaseIndex+1, testCase.operation, expectationFailure.Error())
