@@ -9,6 +9,21 @@ import (
 	"github.com/blorticus/nibblers"
 )
 
+func TestUTF8StringNibbler(t *testing.T) {
+	testUTF8NibblerExceptIntoFunctionsUsingType("String", t)
+	testUTF8StringNibblerIntoMethodsUsingType("String", t)
+}
+
+func TestUTF8RuneSliceNibbler(t *testing.T) {
+	testUTF8NibblerExceptIntoFunctionsUsingType("RuneSlice", t)
+	testUTF8StringNibblerIntoMethodsUsingType("RuneSlice", t)
+}
+
+func TestUTF8ByteSliceNibbler(t *testing.T) {
+	testUTF8NibblerExceptIntoFunctionsUsingType("ByteSlice", t)
+	testUTF8StringNibblerIntoMethodsUsingType("ByteSlice", t)
+}
+
 type utf8NibblerTestCase struct {
 	testname                  string
 	operation                 string // "Read", "Unread", "Peek", "Whitespace", "Words", "Matching", "NotMatching"
@@ -22,7 +37,7 @@ type utf8NibblerTestCase struct {
 func (testCase *utf8NibblerTestCase) testAgainstNibbler(nibbler nibblers.UTF8Nibbler) error {
 	switch testCase.operation {
 	case "Read":
-		nextReadRune, err := nibbler.ReadCaracter()
+		nextReadRune, err := nibbler.ReadCharacter()
 		if expectationFailure := testCase.testReturnedError(err); expectationFailure != nil {
 			return expectationFailure
 		}
@@ -84,7 +99,7 @@ func (testCase *utf8NibblerTestCase) testAgainstNibbler(nibbler nibblers.UTF8Nib
 		}
 
 	case "Matching":
-		runes, err := nibbler.ReadCharactersMatching(testCase.matcherFunction)
+		runes, err := nibbler.ReadConsecutiveCharactersMatching(testCase.matcherFunction)
 		if expectationFailure := testCase.testReturnedError(err); expectationFailure != nil {
 			return expectationFailure
 		}
@@ -98,7 +113,7 @@ func (testCase *utf8NibblerTestCase) testAgainstNibbler(nibbler nibblers.UTF8Nib
 		}
 
 	case "NotMatching":
-		runes, err := nibbler.ReadCharactersNotMatching(testCase.matcherFunction)
+		runes, err := nibbler.ReadConsecutiveCharactersNotMatching(testCase.matcherFunction)
 		if expectationFailure := testCase.testReturnedError(err); expectationFailure != nil {
 			return expectationFailure
 		}
@@ -201,10 +216,23 @@ func matcherFunction2(r rune) bool {
 	}
 }
 
-func TestUTF8StringNibbler(t *testing.T) {
+func testUTF8NibblerExceptIntoFunctionsUsingType(typeOfNibbler string, t *testing.T) {
 	runeString := "∀∁∂∃ ∄ ∅∆∇\t a∉∊  \r    ∋c∍∎\\  +-  ∀∁∂∃ ∄ ∅∆∇\t ∈∉∊ ∀∁∂∃ \n"
 
-	nibbler := nibblers.NewUTF8StringNibbler(runeString)
+	var nibbler nibblers.UTF8Nibbler
+
+	switch typeOfNibbler {
+	case "String":
+		nibbler = nibblers.NewUTF8StringNibbler(runeString)
+	case "RuneSlice":
+		nibbler = nibblers.NewUTF8RuneSliceNibbler(stringToRuneSlice(runeString))
+	case "ByteSlice":
+		nibbler = nibblers.NewUTF8ByteSliceNibbler([]byte(runeString))
+	case "Reader":
+	default:
+		panic(fmt.Sprintf("invalid typeOfNibbler (%s) for testUTF8NibblerExceptIntoFunctionsUsingType", typeOfNibbler))
+	}
+
 	for _, testCase := range []*utf8NibblerTestCase{
 		{testname: "Read [1]", operation: "Read", expectedReadOrPeekRune: '∀'},
 		{testname: "Peek [1]", operation: "Peek", expectedReadOrPeekRune: '∁'},
@@ -266,10 +294,10 @@ func (testCase *nibbleIntoTestCase) testAgainstNibblerAndReceiver(nibbler nibble
 
 	switch testCase.operation {
 	case "Matching":
-		runesReadIntoBuffer, err = nibbler.ReadCharactersMatchingInto(testCase.matcherFunction, receiver)
+		runesReadIntoBuffer, err = nibbler.ReadConsecutiveCharactersMatchingInto(testCase.matcherFunction, receiver)
 
 	case "NotMatching":
-		runesReadIntoBuffer, err = nibbler.ReadCharactersNotMatchingInto(testCase.matcherFunction, receiver)
+		runesReadIntoBuffer, err = nibbler.ReadConsecutiveCharactersNotMatchingInto(testCase.matcherFunction, receiver)
 
 	case "Words":
 		runesReadIntoBuffer, err = nibbler.ReadConsecutiveWordCharactersInto(receiver)
@@ -312,9 +340,22 @@ func (testCase *nibbleIntoTestCase) testAgainstNibblerAndReceiver(nibbler nibble
 	return nil
 }
 
-func TestUTF8StringNibblerIntoMethods(t *testing.T) {
-	testString := "this    \t izz  schön but ∋c∍lylongin∀∁∂strings\r\n ok?"
-	nibbler := nibblers.NewUTF8StringNibbler(testString)
+func testUTF8StringNibblerIntoMethodsUsingType(typeOfNibbler string, t *testing.T) {
+	runeString := "this    \t izz  schön but ∋c∍lylongin∀∁∂strings\r\n ok?"
+
+	var nibbler nibblers.UTF8Nibbler
+
+	switch typeOfNibbler {
+	case "String":
+		nibbler = nibblers.NewUTF8StringNibbler(runeString)
+	case "RuneSlice":
+		nibbler = nibblers.NewUTF8RuneSliceNibbler(stringToRuneSlice(runeString))
+	case "ByteSlice":
+		nibbler = nibblers.NewUTF8ByteSliceNibbler([]byte(runeString))
+	case "Reader":
+	default:
+		panic(fmt.Sprintf("invalid typeOfNibbler (%s) for testUTF8StringNibblerIntoMethodsUsingType", typeOfNibbler))
+	}
 
 	receiver := make([]rune, 5)
 
