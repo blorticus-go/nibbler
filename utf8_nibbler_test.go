@@ -6,6 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	mock "github.com/blorticus/go-test-mocks"
 	"github.com/blorticus/nibblers"
 )
 
@@ -22,6 +23,11 @@ func TestUTF8RuneSliceNibbler(t *testing.T) {
 func TestUTF8ByteSliceNibbler(t *testing.T) {
 	testUTF8NibblerExceptIntoFunctionsUsingType("ByteSlice", t)
 	testUTF8StringNibblerIntoMethodsUsingType("ByteSlice", t)
+}
+
+func TestUTF8ReaderNibbler(t *testing.T) {
+	testUTF8NibblerExceptIntoFunctionsUsingType("Reader", t)
+	testUTF8StringNibblerIntoMethodsUsingType("Reader", t)
 }
 
 type utf8NibblerTestCase struct {
@@ -229,6 +235,13 @@ func testUTF8NibblerExceptIntoFunctionsUsingType(typeOfNibbler string, t *testin
 	case "ByteSlice":
 		nibbler = nibblers.NewUTF8ByteSliceNibbler([]byte(runeString))
 	case "Reader":
+		reader := mock.NewReader().
+			AddGoodRead([]byte(runeString[:9])).
+			AddGoodRead([]byte(runeString[9:10])).
+			AddGoodRead([]byte(runeString[10:11])).
+			AddGoodRead([]byte(runeString[11:28])).
+			AddGoodRead([]byte(runeString[28:])).AddEOF()
+		nibbler = nibblers.NewUTF8ReaderNibbler(reader)
 	default:
 		panic(fmt.Sprintf("invalid typeOfNibbler (%s) for testUTF8NibblerExceptIntoFunctionsUsingType", typeOfNibbler))
 	}
@@ -353,6 +366,12 @@ func testUTF8StringNibblerIntoMethodsUsingType(typeOfNibbler string, t *testing.
 	case "ByteSlice":
 		nibbler = nibblers.NewUTF8ByteSliceNibbler([]byte(runeString))
 	case "Reader":
+		reader := mock.NewReader().
+			AddGoodRead([]byte(runeString[:27])).
+			AddGoodRead([]byte(runeString[27:47])).
+			AddGoodRead([]byte(runeString[47:])).AddEOF()
+		nibbler = nibblers.NewUTF8ReaderNibbler(reader)
+
 	default:
 		panic(fmt.Sprintf("invalid typeOfNibbler (%s) for testUTF8StringNibblerIntoMethodsUsingType", typeOfNibbler))
 	}
