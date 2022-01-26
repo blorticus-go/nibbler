@@ -1,8 +1,9 @@
 # nibbler
 
-Nibble chunks from Reader streams and slice in a common way
+Nibblers provide a means to treat a slice and a `Reader` in a uniform way when they are used as the source for a stream of data, where the stream is generally read without (much) rewinding.  Compare reading data from a byte `Reader` when compared to reading data that is in a slice.  When a `Reader` is used, a `Read()` may be needed periodically, until `EOF` is encountered.  It may not be desirable to simply read all bytes into a single backing slice, particularly if the `Reader` is attached to a source that will generate a very large amount of data.  If a caller mostly wishes to move forward in the stream (perhaps with occassional `peek` and `unread` operations where needed), a large and growing backing slice may just represent a waste of memory. 
 
 ## Overview
 
-This is a golang module that provides an interface for treating a Reader and a byte slice in a similar way when reading one byte at-a-time, or a sequence of bytes based on a character set, where each character is in the UTF-8 range of codepoint, 1..255, inclusive.  It is possible to peek ahead in the byte stream, or return a character previously read to the stream.  When using a Reader as the stream source, the package will automatically trigger a Read() whenever necessary.
+All Nibblers use an abstract pointer to data units.  A data unit may be, for example, a byte or a rune.  All Nibblers support the same set of basic operations: `Read`, `Unread` and `Peek`.  `Read` will read one data unit from the stream and advance the pointer by one unit; `Unread` will rewind the pointer in the data stream by one unit; and `Peek` will look at the next data unit without advancing the stream pointer.  When the end of underlying stream is reached, `Read` and `Peek` return `io.EOF`.  Attempting to `Unread` when the pointer is at the start of the stream generates an `error`.  A Nibbler may choose to arbitrary limit the number of units that can be `Unread`.  This frees Nibblers from having to back a `Reader` with a growing backing data store.
 
+Currently, there are two Nibbler types: a `ByteNibbler` and a `UTF8Reader`.  For a `ByteNibbler`, the data unit is a `byte`.  For a `UTF8Reader`, the data unit is a `rune.
