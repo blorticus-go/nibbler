@@ -30,6 +30,193 @@ func TestUTF8ReaderNibbler(t *testing.T) {
 	testUTF8StringNibblerIntoMethodsUsingType("Reader", t)
 }
 
+type utf8MatcherDiscardsTestCase struct {
+	typeOfDiscard                       string // "Whitespace", "Word", "spaces", "ascii", "notAsciiAlpha"
+	expectedNumberOfDiscardedCharacters int
+	expectToBeAtEOFAfterDiscards        bool
+	expectedNextCharacterAfterDiscard   rune
+	expectEOF                           bool
+}
+
+func asciiSpaceMatcher(c rune) bool {
+	return c == ' '
+}
+
+func asciiCharacterMatcher(c rune) bool {
+	return c > 0 && c < 128
+}
+
+func asciiAlphaMatcher(c rune) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func (testCase *utf8MatcherDiscardsTestCase) testAgainstMatcher(matcher *nibblers.UTF8NibblerMatcher) error {
+	var discardError error
+	var numberOfDiscardedCharacters int
+
+	switch testCase.typeOfDiscard {
+	case "Whitespace":
+		numberOfDiscardedCharacters, discardError = matcher.DiscardConsecutiveWhitespaceCharacters()
+
+	case "Word":
+		numberOfDiscardedCharacters, discardError = matcher.DiscardConsecutiveWordCharacters()
+
+	case "spaces":
+		numberOfDiscardedCharacters, discardError = matcher.DiscardConsecutiveCharactersMatching(asciiSpaceMatcher)
+
+	case "ascii":
+		numberOfDiscardedCharacters, discardError = matcher.DiscardConsecutiveCharactersMatching(asciiCharacterMatcher)
+
+	case "notAsciiAlpha":
+		numberOfDiscardedCharacters, discardError = matcher.DiscardConsecutiveCharactersNotMatching(asciiAlphaMatcher)
+
+	default:
+		return fmt.Errorf("invalid test case type (%s) provided", testCase.typeOfDiscard)
+	}
+
+	if testCase.expectEOF {
+		if discardError == nil {
+			return fmt.Errorf("expected io.EOF, got no error")
+		}
+
+		if discardError != io.EOF {
+			return fmt.Errorf("expected io.EOF, got error = (%s)", discardError.Error())
+		}
+
+		return nil
+	}
+
+	if discardError != nil {
+		if discardError == io.EOF {
+			return fmt.Errorf("did not expect io.EOF, but got it")
+		}
+
+		return fmt.Errorf("did not expect error, but got error = (%s)", discardError.Error())
+	}
+
+	if numberOfDiscardedCharacters != testCase.expectedNumberOfDiscardedCharacters {
+		return fmt.Errorf("expected (%d) discarded characters, got (%d)", testCase.expectedNumberOfDiscardedCharacters, numberOfDiscardedCharacters)
+	}
+
+	characterAfterDiscards, err := matcher.UnderlyingNibbler().PeekAtNextCharacter()
+	if err != nil {
+		if err == io.EOF {
+			if !testCase.expectToBeAtEOFAfterDiscards {
+				return fmt.Errorf("expected no io.EOF on peek after discards, but got it")
+			}
+
+			return nil
+		}
+
+		return fmt.Errorf("expected no error on peek after discards, but got error = (%s)", err.Error())
+	}
+
+	if testCase.expectToBeAtEOFAfterDiscards {
+		return fmt.Errorf("expected io.EOF on peek after discards, but got none")
+	}
+
+	if characterAfterDiscards != testCase.expectedNextCharacterAfterDiscard {
+		return fmt.Errorf("expected (%c) on peek after discards, but got (%c)", testCase.expectedNextCharacterAfterDiscard, characterAfterDiscards)
+	}
+
+	return nil
+}
+
+func TestUTF8NibblerDiscards(t *testing.T) {
+	runeString := "∀∁∂∃ ∄ ∅∆∇\t z∉∊  \r    ∋∍∎\\c  \t \r\n+-∀abc∃"
+
+	nibbler := nibblers.NewUTF8StringNibbler(runeString)
+	matcher := nibblers.NewUTF8NibblerMatcher(nibbler)
+
+	for testCaseIndex, testCase := range []*utf8MatcherDiscardsTestCase{
+		{
+			typeOfDiscard:                       "Whitespace",
+			expectedNumberOfDiscardedCharacters: 0,
+			expectToBeAtEOFAfterDiscards:        false,
+			expectedNextCharacterAfterDiscard:   '∀',
+			expectEOF:                           false,
+		},
+		{
+			typeOfDiscard:                       "ascii",
+			expectedNumberOfDiscardedCharacters: 0,
+			expectToBeAtEOFAfterDiscards:        false,
+			expectedNextCharacterAfterDiscard:   '∀',
+			expectEOF:                           false,
+		},
+		{
+			typeOfDiscard:                       "Word",
+			expectedNumberOfDiscardedCharacters: 4,
+			expectToBeAtEOFAfterDiscards:        false,
+			expectedNextCharacterAfterDiscard:   ' ',
+			expectEOF:                           false,
+		},
+		{
+			typeOfDiscard:                       "Whitespace",
+			expectedNumberOfDiscardedCharacters: 1,
+			expectToBeAtEOFAfterDiscards:        false,
+			expectedNextCharacterAfterDiscard:   '∄',
+			expectEOF:                           false,
+		},
+		{
+			typeOfDiscard:                       "notAsciiAlpha",
+			expectedNumberOfDiscardedCharacters: 7,
+			expectToBeAtEOFAfterDiscards:        false,
+			expectedNextCharacterAfterDiscard:   'z',
+			expectEOF:                           false,
+		},
+		{
+			typeOfDiscard:                       "Whitespace",
+			expectedNumberOfDiscardedCharacters: 0,
+			expectToBeAtEOFAfterDiscards:        false,
+			expectedNextCharacterAfterDiscard:   'z',
+			expectEOF:                           false,
+		},
+		{
+			typeOfDiscard:                       "ascii",
+			expectedNumberOfDiscardedCharacters: 1,
+			expectToBeAtEOFAfterDiscards:        false,
+			expectedNextCharacterAfterDiscard:   '∉',
+			expectEOF:                           false,
+		},
+		{
+			typeOfDiscard:                       "notAsciiAlpha",
+			expectedNumberOfDiscardedCharacters: 13,
+			expectToBeAtEOFAfterDiscards:        false,
+			expectedNextCharacterAfterDiscard:   'c',
+			expectEOF:                           false,
+		},
+		{
+			typeOfDiscard:                       "Word",
+			expectedNumberOfDiscardedCharacters: 1,
+			expectToBeAtEOFAfterDiscards:        false,
+			expectedNextCharacterAfterDiscard:   ' ',
+			expectEOF:                           false,
+		},
+		{
+			typeOfDiscard:                       "Whitespace",
+			expectedNumberOfDiscardedCharacters: 6,
+			expectToBeAtEOFAfterDiscards:        false,
+			expectedNextCharacterAfterDiscard:   '+',
+			expectEOF:                           false,
+		},
+		{
+			typeOfDiscard:                       "Word",
+			expectedNumberOfDiscardedCharacters: 7,
+			expectToBeAtEOFAfterDiscards:        true,
+			expectEOF:                           false,
+		},
+		{
+			typeOfDiscard:                       "Word",
+			expectedNumberOfDiscardedCharacters: 0,
+			expectEOF:                           true,
+		},
+	} {
+		if err := testCase.testAgainstMatcher(matcher); err != nil {
+			t.Errorf("on test case %d: %s", testCaseIndex+1, err.Error())
+		}
+	}
+}
+
 type utf8NibblerTestCase struct {
 	testname                  string
 	operation                 string // "Read", "Unread", "Peek", "Whitespace", "Words", "Matching", "NotMatching"
@@ -41,6 +228,8 @@ type utf8NibblerTestCase struct {
 }
 
 func (testCase *utf8NibblerTestCase) testAgainstNibbler(nibbler nibblers.UTF8Nibbler) error {
+	matcher := nibblers.NewUTF8NibblerMatcher(nibbler)
+
 	switch testCase.operation {
 	case "Read":
 		nextReadRune, err := nibbler.ReadCharacter()
@@ -77,7 +266,7 @@ func (testCase *utf8NibblerTestCase) testAgainstNibbler(nibbler nibblers.UTF8Nib
 		}
 
 	case "Whitespace":
-		runes, err := nibbler.ReadConsecutiveWhitespace()
+		runes, err := matcher.ReadConsecutiveWhitespace()
 		if expectationFailure := testCase.testReturnedError(err); expectationFailure != nil {
 			return expectationFailure
 		}
@@ -91,7 +280,7 @@ func (testCase *utf8NibblerTestCase) testAgainstNibbler(nibbler nibblers.UTF8Nib
 		}
 
 	case "Words":
-		runes, err := nibbler.ReadConsecutiveWordCharacters()
+		runes, err := matcher.ReadConsecutiveWordCharacters()
 		if expectationFailure := testCase.testReturnedError(err); expectationFailure != nil {
 			return expectationFailure
 		}
@@ -105,7 +294,7 @@ func (testCase *utf8NibblerTestCase) testAgainstNibbler(nibbler nibblers.UTF8Nib
 		}
 
 	case "Matching":
-		runes, err := nibbler.ReadConsecutiveCharactersMatching(testCase.matcherFunction)
+		runes, err := matcher.ReadConsecutiveCharactersMatching(testCase.matcherFunction)
 		if expectationFailure := testCase.testReturnedError(err); expectationFailure != nil {
 			return expectationFailure
 		}
@@ -119,7 +308,7 @@ func (testCase *utf8NibblerTestCase) testAgainstNibbler(nibbler nibblers.UTF8Nib
 		}
 
 	case "NotMatching":
-		runes, err := nibbler.ReadConsecutiveCharactersNotMatching(testCase.matcherFunction)
+		runes, err := matcher.ReadConsecutiveCharactersNotMatching(testCase.matcherFunction)
 		if expectationFailure := testCase.testReturnedError(err); expectationFailure != nil {
 			return expectationFailure
 		}
@@ -305,18 +494,20 @@ func (testCase *nibbleIntoTestCase) testAgainstNibblerAndReceiver(nibbler nibble
 	var runesReadIntoBuffer int
 	var err error
 
+	matcher := nibblers.NewUTF8NibblerMatcher(nibbler)
+
 	switch testCase.operation {
 	case "Matching":
-		runesReadIntoBuffer, err = nibbler.ReadConsecutiveCharactersMatchingInto(testCase.matcherFunction, receiver)
+		runesReadIntoBuffer, err = matcher.ReadConsecutiveCharactersMatchingInto(testCase.matcherFunction, receiver)
 
 	case "NotMatching":
-		runesReadIntoBuffer, err = nibbler.ReadConsecutiveCharactersNotMatchingInto(testCase.matcherFunction, receiver)
+		runesReadIntoBuffer, err = matcher.ReadConsecutiveCharactersNotMatchingInto(testCase.matcherFunction, receiver)
 
 	case "Words":
-		runesReadIntoBuffer, err = nibbler.ReadConsecutiveWordCharactersInto(receiver)
+		runesReadIntoBuffer, err = matcher.ReadConsecutiveWordCharactersInto(receiver)
 
 	case "Whitespace":
-		runesReadIntoBuffer, err = nibbler.ReadConsecutiveWhitespaceInto(receiver)
+		runesReadIntoBuffer, err = matcher.ReadConsecutiveWhitespaceInto(receiver)
 
 	default:
 		panic(fmt.Sprintf("test case operation (%s) not known", testCase.operation))
