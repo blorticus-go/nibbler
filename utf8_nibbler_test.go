@@ -7,7 +7,7 @@ import (
 	"unicode/utf8"
 
 	mock "github.com/blorticus/go-test-mocks"
-	"github.com/blorticus/nibblers"
+	"github.com/blorticus-go/nibblers"
 )
 
 func TestUTF8StringNibbler(t *testing.T) {

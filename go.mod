@@ -1,4 +1,4 @@
-module github.com/blorticus/nibblers
+module github.com/blorticus-go/nibblers
 
 go 1.15
 
