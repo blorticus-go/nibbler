@@ -22,19 +22,30 @@ type UTF8Nibbler interface {
 	// PeekAtNextCharacter returns the next character in the stream, but does not advance the cursor. It may return
 	// io.EOF or an error in the same way and for the same reason that ReadCharacter() does.
 	PeekAtNextCharacter() (rune, error)
+
+	// Bookends instruct the Nibbler to preserve characters that are read in the backing store.  This starts a bookend
+	// at the next unread character (though the character may have been peeked).
+	StartBookending() error
+
+	// This stops the bookend at the last read character (but not peeked character) and returns a slice
+	// containing the contents between the bookends.  The nibbler is permitted to discard the bookended characters from its
+	// backing buffer.
+	StopBookending() ([]rune, error)
 }
 
 // UTF8StringNibbler is a UTF8Nibbler that operates on golang strings, treating them as UTF8 byte streams.
 type UTF8StringNibbler struct {
-	backingString               string
-	indexInStringOfNextReadByte int
+	backingString                     string
+	indexInStringOfNextReadByte       int
+	bookendStartOffsetInBackingString int // negative if no bookend start is active
 }
 
 // NewUTF8StringNibbler creates a new UTF8StringNibbler that will operate on the provided string.
 func NewUTF8StringNibbler(nibbleString string) *UTF8StringNibbler {
 	return &UTF8StringNibbler{
-		backingString:               nibbleString,
-		indexInStringOfNextReadByte: 0,
+		backingString:                     nibbleString,
+		indexInStringOfNextReadByte:       0,
+		bookendStartOffsetInBackingString: -1,
 	}
 }
 
@@ -92,17 +103,47 @@ func (nibbler *UTF8StringNibbler) PeekAtNextCharacter() (rune, error) {
 	return nextCharacter, nil
 }
 
+// StartBookending starts a bookend at the the next unread character.
+func (nibbler *UTF8StringNibbler) StartBookending() error {
+	if nibbler.indexInStringOfNextReadByte >= len(nibbler.backingString) {
+		return io.EOF
+	}
+
+	if nibbler.bookendStartOffsetInBackingString >= 0 {
+		return fmt.Errorf("a bookend is already active")
+	}
+
+	nibbler.bookendStartOffsetInBackingString = nibbler.indexInStringOfNextReadByte
+
+	return nil
+}
+
+// StopBookending returns a rune slice from the underlying string from the character
+// after the start of bookending to the last character read (but not peeked).
+func (nibbler *UTF8StringNibbler) StopBookending() ([]rune, error) {
+	if nibbler.bookendStartOffsetInBackingString < 0 {
+		return nil, fmt.Errorf("no bookend was started")
+	}
+
+	s := nibbler.bookendStartOffsetInBackingString
+	nibbler.bookendStartOffsetInBackingString = -1
+
+	return []rune(nibbler.backingString[s:nibbler.indexInStringOfNextReadByte]), nil
+}
+
 // UTF8RuneSliceNibbler is a concrete implementation of UTF8Nibbler. It operates on a fixed rune slice.
 type UTF8RuneSliceNibbler struct {
-	backingSlice        []rune
-	indexOfLastReadRune int
+	backingSlice                     []rune
+	indexOfLastReadRune              int
+	bookendStartOffsetInBackingSlice int // negative if no bookend start is active
 }
 
 // NewUTF8RuneSliceNibbler returns a nibbler for the provided rune slice.
 func NewUTF8RuneSliceNibbler(runeSlice []rune) *UTF8RuneSliceNibbler {
 	return &UTF8RuneSliceNibbler{
-		backingSlice:        runeSlice,
-		indexOfLastReadRune: -1,
+		backingSlice:                     runeSlice,
+		indexOfLastReadRune:              -1,
+		bookendStartOffsetInBackingSlice: -1,
 	}
 }
 
@@ -140,6 +181,33 @@ func (nibbler *UTF8RuneSliceNibbler) PeekAtNextCharacter() (rune, error) {
 	return nibbler.backingSlice[nibbler.indexOfLastReadRune+1], nil
 }
 
+// StartBookending instruct the Nibbler to preserve characters that are read in the backing store
+func (nibbler *UTF8RuneSliceNibbler) StartBookending() error {
+	if nibbler.indexOfLastReadRune >= len(nibbler.backingSlice) {
+		return io.EOF
+	}
+
+	if nibbler.bookendStartOffsetInBackingSlice >= 0 {
+		return fmt.Errorf("a bookend is already active")
+	}
+
+	nibbler.bookendStartOffsetInBackingSlice = nibbler.indexOfLastReadRune
+
+	return nil
+}
+
+// StopBookending stops the bookend at the last read character and returns a slice containing the contents of the bookend.
+func (nibbler *UTF8RuneSliceNibbler) StopBookending() ([]rune, error) {
+	if nibbler.bookendStartOffsetInBackingSlice < 0 {
+		return nil, fmt.Errorf("no active bookend")
+	}
+
+	s := nibbler.bookendStartOffsetInBackingSlice
+	nibbler.bookendStartOffsetInBackingSlice = -1
+
+	return nibbler.backingSlice[s : nibbler.indexOfLastReadRune+1], nil
+}
+
 // UTF8ByteSliceNibbler is a concrete implementation of UTF8Nibbler, operating on a
 // byte slice, which must contain only valid UTF8 sequences.
 type UTF8ByteSliceNibbler struct {
@@ -174,6 +242,21 @@ func (nibbler *UTF8ByteSliceNibbler) PeekAtNextCharacter() (rune, error) {
 	return nibbler.underlyingStringNibbler.PeekAtNextCharacter()
 }
 
+// StartBookending instruct the Nibbler to preserve characters that are read in the backing store.
+func (nibbler *UTF8ByteSliceNibbler) StartBookending() error {
+	return nibbler.underlyingStringNibbler.StartBookending()
+}
+
+// StopBookending stops the bookend at the last read character and returns a slice containing the contents of the bookend.
+func (nibbler *UTF8ByteSliceNibbler) StopBookending() ([]rune, error) {
+	returnedSubString, err := nibbler.underlyingStringNibbler.StopBookending()
+	if err != nil {
+		return nil, err
+	}
+
+	return []rune(returnedSubString), nil
+}
+
 // UTF8ReaderNibbler is a concrete implementation of UTF8Nibbler, operating on an io.Reader().
 // It will trigger Read() when necessary to read more characters from the stream, until it reaches
 // io.EOF or an error on Read().
@@ -182,6 +265,7 @@ type UTF8ReaderNibbler struct {
 	readBuffer                       []byte
 	bufferOfReadBytes                []byte
 	indexInReadBytesBufferOfNextRune int
+	indexInBufferOfBookendStart      int
 }
 
 // NewUTF8ReaderNibbler returns a new UTF8ReaderNibbler using the provided reader as the source. The
@@ -191,7 +275,8 @@ func NewUTF8ReaderNibbler(sourceReader io.Reader) *UTF8ReaderNibbler {
 		sourceReader:                     sourceReader,
 		readBuffer:                       make([]byte, 9000),
 		bufferOfReadBytes:                make([]byte, 0, 9000),
-		indexInReadBytesBufferOfNextRune: -1,
+		indexInReadBytesBufferOfNextRune: 0,
+		indexInBufferOfBookendStart:      -1,
 	}
 }
 
@@ -215,12 +300,6 @@ func (nibbler *UTF8ReaderNibbler) triggerReadFromStreamIntoBufferIfNeeded() erro
 		if _, err := nibbler.readFromStreamIntoReadBuffer(); err != nil {
 			return err
 		}
-	} else if nibbler.indexInReadBytesBufferOfNextRune < 0 {
-		if _, err := nibbler.readFromStreamIntoReadBuffer(); err != nil {
-			return err
-		}
-
-		nibbler.indexInReadBytesBufferOfNextRune = 0
 	}
 
 	return nil
@@ -288,4 +367,27 @@ func (nibbler *UTF8ReaderNibbler) PeekAtNextCharacter() (rune, error) {
 	}
 
 	return nextRune, nil
+}
+
+// StartBookending instruct the Nibbler to preserve characters that are read in the backing store.
+func (nibbler *UTF8ReaderNibbler) StartBookending() error {
+	if nibbler.indexInBufferOfBookendStart >= 0 {
+		return fmt.Errorf("a bookend is already active")
+	}
+
+	nibbler.indexInBufferOfBookendStart = nibbler.indexInReadBytesBufferOfNextRune
+
+	return nil
+}
+
+// StopBookending stops the bookend at the last read character and returns a slice containing the contents of the bookend.
+func (nibbler *UTF8ReaderNibbler) StopBookending() ([]rune, error) {
+	if nibbler.indexInBufferOfBookendStart < 0 {
+		return nil, fmt.Errorf("no bookmark is active")
+	}
+
+	s := nibbler.indexInBufferOfBookendStart
+	nibbler.indexInBufferOfBookendStart = -1
+
+	return []rune(string(nibbler.bufferOfReadBytes[s:nibbler.indexInReadBytesBufferOfNextRune])), nil
 }
