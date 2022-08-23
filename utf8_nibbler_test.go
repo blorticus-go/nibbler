@@ -859,5 +859,67 @@ func bookendTestsForUTF8Nibblers(tester *BookendTester) error {
 		return fmt.Errorf("on bookending characters 16 through the end followed by a peek: %s", theExpectations.Error())
 	}
 
+	tester.createNibblerWithString("∋c∍lylongi schön but \r\n ok? おはよう")
+	nibbler := tester.nibbler
+
+	runeSets := make([][]rune, 8)
+	errors := make([]error, 8)
+
+	if err := nibbler.StartBookending(); err != nil {
+		return fmt.Errorf("on StartBookending(): %s", err.Error())
+	}
+
+	runeSets[0], errors[0] = nibbler.CharactersSinceStartOfBookend()
+
+	if err := readCharactersFromNibbler(nibbler, 4); err != nil {
+		return fmt.Errorf("on reading characters [1], error = (%s)", err.Error())
+	}
+	runeSets[1], errors[1] = nibbler.CharactersSinceStartOfBookend()
+	runeSets[2], errors[2] = nibbler.CharactersSinceStartOfBookend()
+
+	if err := readCharactersFromNibbler(nibbler, 4); err != nil {
+		return fmt.Errorf("on reading characters [2], error = (%s)", err.Error())
+	}
+	runeSets[3], errors[3] = nibbler.CharactersSinceStartOfBookend()
+
+	if err := readCharactersFromNibbler(nibbler, 8); err != nil {
+		return fmt.Errorf("on reading characters [3], error = (%s)", err.Error())
+	}
+	runeSets[4], errors[4] = nibbler.CharactersSinceStartOfBookend()
+
+	if err := readCharactersFromNibbler(nibbler, 16); err != nil {
+		return fmt.Errorf("on reading characters [4], error = (%s)", err.Error())
+	}
+	runeSets[5], errors[5] = nibbler.CharactersSinceStartOfBookend()
+
+	if err := readCharactersFromNibbler(nibbler, 1); err != nil && err != io.EOF {
+		return fmt.Errorf("on reading characters [5], error = (%s)", err.Error())
+	}
+	runeSets[6], errors[6] = nibbler.CharactersSinceStartOfBookend()
+
+	runeSets[7], errors[7] = nibbler.StopBookending()
+
+	for _, err := range errors {
+		if err != nil {
+			return fmt.Errorf("expected no error, got (%s)", err.Error())
+		}
+	}
+
+	for i, expectedRuneSliceString := range []string{"", "∋c∍l", "∋c∍l", "∋c∍lylon", "∋c∍lylongi schön", "∋c∍lylongi schön but \r\n ok? おはよう", "∋c∍lylongi schön but \r\n ok? おはよう", "∋c∍lylongi schön but \r\n ok? おはよう"} {
+		if string(runeSets[i]) != expectedRuneSliceString {
+			return fmt.Errorf("expected runeSet (%s), got (%s)", expectedRuneSliceString, string(runeSets[i]))
+		}
+	}
+
+	return nil
+}
+
+func readCharactersFromNibbler(nibbler nibblers.UTF8Nibbler, numberToRead int) error {
+	for i := 0; i < numberToRead; i++ {
+		if _, err := nibbler.ReadCharacter(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
