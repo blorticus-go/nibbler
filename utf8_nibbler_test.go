@@ -622,8 +622,6 @@ func testUTF8StringNibblerIntoMethodsUsingType(typeOfNibbler string, t *testing.
 type BookendTester struct {
 	nibbler                                      nibblers.UTF8Nibbler
 	methodForCreatingTheNibblerThatUsesTheString func(s string) nibblers.UTF8Nibbler
-	pendingError                                 error
-	pendingRuneSet                               []rune
 }
 
 func NewBookendTester(methodForCreatingTheNibblerThatUsesTheString func(s string) nibblers.UTF8Nibbler) *BookendTester {
@@ -636,116 +634,108 @@ func (tester *BookendTester) createNibblerWithString(s string) {
 	tester.nibbler = tester.methodForCreatingTheNibblerThatUsesTheString(s)
 }
 
-type BookendTestStep func(nibblers.UTF8Nibbler) ([]rune, error)
+type BookendTestStep func(nibblers.UTF8Nibbler) (anticipatedRuneSet []rune, anticipatedErrorOrEOF error, thisStepIsABookendOperation bool)
 
-func (tester *BookendTester) After(steps []BookendTestStep) *BookendTester {
+type BookendTesterResults struct {
+	tester                                 *BookendTester
+	collectedErrorsFromBookendOperations   []error
+	collectedRuneSetsFromBookendOperations [][]rune
+
+	expectationFailureError error
+}
+
+func (tester *BookendTester) After(steps []BookendTestStep) *BookendTesterResults {
+	results := &BookendTesterResults{
+		collectedErrorsFromBookendOperations:   make([]error, 0, len(steps)),
+		collectedRuneSetsFromBookendOperations: make([][]rune, 0, len(steps)),
+	}
+
 	for _, step := range steps {
-		runeSet, err := step(tester.nibbler)
-		if err != nil {
-			tester.pendingError = err
+		runeSet, err, isABookendingOperation := step(tester.nibbler)
 
-			if err != io.EOF {
-				return tester
+		if isABookendingOperation {
+			results.collectedErrorsFromBookendOperations = append(results.collectedErrorsFromBookendOperations, err)
+			results.collectedRuneSetsFromBookendOperations = append(results.collectedRuneSetsFromBookendOperations, runeSet)
+		}
+	}
+
+	return results
+}
+
+type BookendTesterExpectation struct {
+	TheRuneSetToBe []rune
+	AnError        bool
+}
+
+func (results *BookendTesterResults) Expect(theSequence []BookendTesterExpectation) *BookendTesterResults {
+	if len(theSequence) != len(results.collectedRuneSetsFromBookendOperations) {
+		results.expectationFailureError = fmt.Errorf("expected (%d) runeset results, got (%d)", len(theSequence), len(results.collectedRuneSetsFromBookendOperations))
+	}
+
+	if len(theSequence) != len(results.collectedErrorsFromBookendOperations) {
+		results.expectationFailureError = fmt.Errorf("expected (%d) error results, got (%d)", len(theSequence), len(results.collectedErrorsFromBookendOperations))
+	}
+
+	for i, expectation := range theSequence {
+		if err := compareRuneSets(expectation.TheRuneSetToBe, results.collectedRuneSetsFromBookendOperations[i]); err != nil {
+			results.expectationFailureError = err
+			return results
+		}
+
+		receivedError := results.collectedErrorsFromBookendOperations[i]
+
+		if receivedError != nil {
+			if !expectation.AnError {
+				return results.afterSettingErrorTo("expected no error, got (%s)", receivedError.Error())
 			}
-		}
-
-		if len(runeSet) > 0 {
-			tester.pendingRuneSet = runeSet
+		} else if expectation.AnError {
+			return results.afterSettingErrorTo("expected an error, but got none")
 		}
 	}
 
-	return tester
+	return results
 }
 
-func (tester *BookendTester) ExpectTheRuneSet(expectedRuneSet []rune) error {
-	if tester.pendingError != nil {
-		e := tester.pendingError
-		tester.pendingError = nil
-		tester.pendingRuneSet = nil
-		return e
+func (results *BookendTesterResults) afterSettingErrorTo(f string, a ...interface{}) *BookendTesterResults {
+	results.expectationFailureError = fmt.Errorf(f, a...)
+	return results
+}
+
+func (results *BookendTesterResults) Failed() bool {
+	return results.expectationFailureError != nil
+}
+
+func (results *BookendTesterResults) Error() string {
+	return results.expectationFailureError.Error()
+}
+
+func compareRuneSets(expected, actual []rune) error {
+	if expected == nil || len(expected) == 0 {
+		if actual != nil && len(actual) > 0 {
+			return fmt.Errorf("expected an empty runeset, got the runeset (%s)", string(actual))
+		}
+	} else if actual == nil || len(actual) == 0 {
+		return fmt.Errorf("expected the runeset (%s), got an empty runeset", string(expected))
 	}
 
-	if string(tester.pendingRuneSet) != string(expectedRuneSet) {
-		gotRuneSet := tester.pendingRuneSet
-		tester.pendingError = nil
-		tester.pendingRuneSet = nil
-		return fmt.Errorf("expected the rune set (%s), got (%s)", string(expectedRuneSet), string(gotRuneSet))
+	if string(expected) != string(actual) {
+		return fmt.Errorf("expected the runeset (%s), got (%s)", string(expected), string(actual))
 	}
 
 	return nil
 }
 
-func (tester *BookendTester) ExpectEOF() error {
-	if tester.pendingError == nil {
-		return fmt.Errorf("expected EOF, got no EOF")
-	}
-
-	if tester.pendingError != io.EOF {
-		return fmt.Errorf("expected EOF, got (%s)", tester.pendingError.Error())
-	}
-
-	return nil
-}
-
-type BookendTesterChain struct {
-	tester               *BookendTester
-	lastExpectationError error
-}
-
-func (tester *BookendTester) Expect() *BookendTesterChain {
-	return &BookendTesterChain{
-		tester:               tester,
-		lastExpectationError: nil,
-	}
-}
-
-func (chain *BookendTesterChain) Failed() bool {
-	return chain.lastExpectationError != nil
-}
-
-func (chain *BookendTesterChain) Error() string {
-	return chain.lastExpectationError.Error()
-}
-
-func (chain *BookendTesterChain) TheRuneSet(expectedRuneSet []rune) *BookendTesterChain {
-	if chain.tester.pendingRuneSet == nil || len(chain.tester.pendingRuneSet) == 0 {
-		if expectedRuneSet == nil || len(expectedRuneSet) == 0 {
-			return chain
-		} else {
-			chain.lastExpectationError = fmt.Errorf("expected the rune set (%s), got an empty rune set", string(expectedRuneSet))
-			return chain
-		}
-	}
-
-	if string(chain.tester.pendingRuneSet) != string(expectedRuneSet) {
-		chain.lastExpectationError = fmt.Errorf("expected the rune set (%s), got (%s)", string(expectedRuneSet), string(chain.tester.pendingRuneSet))
-		return chain
-	}
-
-	return chain
-}
-
-func (chain *BookendTesterChain) And() *BookendTesterChain {
-	return chain
-}
-
-func (chain *BookendTesterChain) TheEOFIndicator() *BookendTesterChain {
-	if chain.tester.pendingError == nil {
-		chain.lastExpectationError = fmt.Errorf("expected EOF, got no error")
-	} else if chain.tester.pendingError != io.EOF {
-		chain.lastExpectationError = fmt.Errorf("expected EOF, got the error (%s)", chain.tester.pendingError.Error())
-	}
-
-	return chain
-}
-
-func StartingABookend(nibbler nibblers.UTF8Nibbler) ([]rune, error) {
+func StartingABookend(nibbler nibblers.UTF8Nibbler) ([]rune, error, bool) {
 	err := nibbler.StartBookending()
-	return nil, err
+	return nil, err, true
 }
 
-func StoppingTheBookend(nibbler nibblers.UTF8Nibbler) ([]rune, error) {
-	return nibbler.StopBookending()
+func StoppingTheBookend(nibbler nibblers.UTF8Nibbler) ([]rune, error, bool) {
+	return nibbler.StopBookending(), nil, true
+}
+
+func Checkpointing(nibbler nibblers.UTF8Nibbler) ([]rune, error, bool) {
+	return nibbler.BookendCheckpoint(), nil, true
 }
 
 type ReadCharacterIntermediate struct {
@@ -754,14 +744,14 @@ type ReadCharacterIntermediate struct {
 }
 
 func Reading(numberOfCharactersRead int) *ReadCharacterIntermediate {
-	f := func(nibbler nibblers.UTF8Nibbler) ([]rune, error) {
+	f := func(nibbler nibblers.UTF8Nibbler) ([]rune, error, bool) {
 		for i := 0; i < numberOfCharactersRead; i++ {
 			if _, err := nibbler.ReadCharacter(); err != nil {
-				return nil, err
+				return nil, err, false
 			}
 		}
 
-		return nil, nil
+		return nil, nil, false
 	}
 
 	return &ReadCharacterIntermediate{
@@ -776,14 +766,14 @@ type PeekCharacterIntermediate struct {
 }
 
 func PeekingAt(numberOfPeeks int) *PeekCharacterIntermediate {
-	f := func(nibbler nibblers.UTF8Nibbler) ([]rune, error) {
+	f := func(nibbler nibblers.UTF8Nibbler) ([]rune, error, bool) {
 		for i := 0; i < numberOfPeeks; i++ {
 			if _, err := nibbler.PeekAtNextCharacter(); err != nil {
-				return nil, err
+				return nil, err, false
 			}
 		}
 
-		return nil, nil
+		return nil, nil, false
 	}
 
 	return &PeekCharacterIntermediate{
@@ -811,13 +801,20 @@ func TestUTF8NibblerBookending(t *testing.T) {
 	}
 }
 
+func theSameAsTheString(s string) []rune {
+	return []rune(s)
+}
+
 func bookendTestsForUTF8Nibblers(tester *BookendTester) error {
 	tester.createNibblerWithString("∋c∍lylongi schön but \r\n ok? おはよう")
 
 	theExpectation := tester.After([]BookendTestStep{
 		StartingABookend,
 		StoppingTheBookend,
-	}).Expect().TheRuneSet([]rune{})
+	}).Expect([]BookendTesterExpectation{
+		{TheRuneSetToBe: nil},
+		{TheRuneSetToBe: nil},
+	})
 
 	if theExpectation.Failed() {
 		return fmt.Errorf("on bookend start and stop at beginnging: %s", theExpectation.Error())
@@ -827,7 +824,10 @@ func bookendTestsForUTF8Nibblers(tester *BookendTester) error {
 		StartingABookend,
 		Reading(8).Characters,
 		StoppingTheBookend,
-	}).Expect().TheRuneSet([]rune("∋c∍lylon"))
+	}).Expect([]BookendTesterExpectation{
+		{TheRuneSetToBe: nil},
+		{TheRuneSetToBe: theSameAsTheString("∋c∍lylon")},
+	})
 
 	if theExpectation.Failed() {
 		return fmt.Errorf("on bookending start through character 8: %s", theExpectation.Error())
@@ -839,7 +839,10 @@ func bookendTestsForUTF8Nibblers(tester *BookendTester) error {
 		Reading(4).Characters,
 		PeekingAt(1).Character,
 		StoppingTheBookend,
-	}).Expect().TheRuneSet([]rune("chön"))
+	}).Expect([]BookendTesterExpectation{
+		{TheRuneSetToBe: nil},
+		{TheRuneSetToBe: theSameAsTheString("chön")},
+	})
 
 	if theExpectation.Failed() {
 		return fmt.Errorf("on bookending characters 12 through 16 followed by a peek: %s", theExpectation.Error())
@@ -854,71 +857,45 @@ func bookendTestsForUTF8Nibblers(tester *BookendTester) error {
 		PeekingAt(1).Character,
 		Reading(8).Characters,
 		StoppingTheBookend,
-	}).Expect().TheEOFIndicator().And().TheRuneSet([]rune(" \r\n ok? おはよう"))
+	}).Expect([]BookendTesterExpectation{
+		{TheRuneSetToBe: nil},
+		{TheRuneSetToBe: theSameAsTheString(" \r\n ok? おはよう")},
+	})
+
 	if theExpectations.Failed() {
 		return fmt.Errorf("on bookending characters 16 through the end followed by a peek: %s", theExpectations.Error())
 	}
 
 	tester.createNibblerWithString("∋c∍lylongi schön but \r\n ok? おはよう")
-	nibbler := tester.nibbler
 
-	runeSets := make([][]rune, 8)
-	errors := make([]error, 8)
+	theExpectations = tester.After([]BookendTestStep{
+		StartingABookend,
+		Reading(8).Characters,
+		Reading(4).Characters,
+		Checkpointing,
+		Reading(1).Character,
+		Checkpointing,
+		Checkpointing,
+		Reading(10).Characters,
+		Checkpointing,
+		Reading(9).Characters,
+		Checkpointing,
+		Reading(1).Character,
+		Checkpointing,
+		StoppingTheBookend,
+	}).Expect([]BookendTesterExpectation{
+		{TheRuneSetToBe: nil},
+		{TheRuneSetToBe: theSameAsTheString("∋c∍lylongi s")},
+		{TheRuneSetToBe: theSameAsTheString("c")},
+		{TheRuneSetToBe: nil},
+		{TheRuneSetToBe: theSameAsTheString("hön but \r\n")},
+		{TheRuneSetToBe: theSameAsTheString(" ok? おはよう")},
+		{TheRuneSetToBe: nil},
+		{TheRuneSetToBe: theSameAsTheString("∋c∍lylongi schön but \r\n ok? おはよう")},
+	})
 
-	if err := nibbler.StartBookending(); err != nil {
-		return fmt.Errorf("on StartBookending(): %s", err.Error())
-	}
-
-	runeSets[0], errors[0] = nibbler.CharactersSinceStartOfBookend()
-
-	if err := readCharactersFromNibbler(nibbler, 4); err != nil {
-		return fmt.Errorf("on reading characters [1], error = (%s)", err.Error())
-	}
-	runeSets[1], errors[1] = nibbler.CharactersSinceStartOfBookend()
-	runeSets[2], errors[2] = nibbler.CharactersSinceStartOfBookend()
-
-	if err := readCharactersFromNibbler(nibbler, 4); err != nil {
-		return fmt.Errorf("on reading characters [2], error = (%s)", err.Error())
-	}
-	runeSets[3], errors[3] = nibbler.CharactersSinceStartOfBookend()
-
-	if err := readCharactersFromNibbler(nibbler, 8); err != nil {
-		return fmt.Errorf("on reading characters [3], error = (%s)", err.Error())
-	}
-	runeSets[4], errors[4] = nibbler.CharactersSinceStartOfBookend()
-
-	if err := readCharactersFromNibbler(nibbler, 16); err != nil {
-		return fmt.Errorf("on reading characters [4], error = (%s)", err.Error())
-	}
-	runeSets[5], errors[5] = nibbler.CharactersSinceStartOfBookend()
-
-	if err := readCharactersFromNibbler(nibbler, 1); err != nil && err != io.EOF {
-		return fmt.Errorf("on reading characters [5], error = (%s)", err.Error())
-	}
-	runeSets[6], errors[6] = nibbler.CharactersSinceStartOfBookend()
-
-	runeSets[7], errors[7] = nibbler.StopBookending()
-
-	for _, err := range errors {
-		if err != nil {
-			return fmt.Errorf("expected no error, got (%s)", err.Error())
-		}
-	}
-
-	for i, expectedRuneSliceString := range []string{"", "∋c∍l", "∋c∍l", "∋c∍lylon", "∋c∍lylongi schön", "∋c∍lylongi schön but \r\n ok? おはよう", "∋c∍lylongi schön but \r\n ok? おはよう", "∋c∍lylongi schön but \r\n ok? おはよう"} {
-		if string(runeSets[i]) != expectedRuneSliceString {
-			return fmt.Errorf("expected runeSet (%s), got (%s)", expectedRuneSliceString, string(runeSets[i]))
-		}
-	}
-
-	return nil
-}
-
-func readCharactersFromNibbler(nibbler nibblers.UTF8Nibbler, numberToRead int) error {
-	for i := 0; i < numberToRead; i++ {
-		if _, err := nibbler.ReadCharacter(); err != nil {
-			return err
-		}
+	if theExpectations.Failed() {
+		return fmt.Errorf("on checkpointing tests: %s", theExpectations.Error())
 	}
 
 	return nil
